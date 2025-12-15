@@ -7,9 +7,9 @@ import streamlit.components.v1 as components
 import json
 from datetime import datetime
 
-from components.canvas import CanvasComponent
-from services.jsonbin import JSONBinService
-from utils.image_handler import ImageHandler
+from canvas import CanvasComponent
+from jsonbin import JSONBinService
+from image_handler import ImageHandler
 
 # 页面配置
 st.set_page_config(
