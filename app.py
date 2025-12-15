@@ -83,7 +83,7 @@ with col_main:
     # 处理接收到的绘图数据
     if drawing_data:
         try:
-            data = json.loads(drawing_data)
+            data = json.loads(drawing_data) if isinstance(drawing_data, str) else drawing_data
             st.session_state.drawing_data = data
         except json.JSONDecodeError:
             st.error("❌ 数据解析失败")
