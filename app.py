@@ -129,14 +129,19 @@ if st.session_state.drawing_data:
         data = st.session_state.drawing_data
         
         # 下载 JSON
-        json_str = json.dumps(data, indent=2, ensure_ascii=False)
-        st.download_button(
-            label="📥 下载 JSON",
-            data=json_str,
-            file_name=f"drawing_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
-            mime="application/json",
-            use_container_width=True
-        )
+    if st.session_state.drawing_data:
+        data = st.session_state.drawing_data if isinstance(st.session_state.drawing_data, dict) else None
+
+        if data:
+            json_str = json.dumps(data, indent=2, ensure_ascii=False)
+            st.download_button(
+                label="📥 下载 JSON",
+                data=json_str,
+                file_name=f"drawing_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
+                mime="application/json",
+                use_container_width=True
+            )
+            
         
         # 下载图像
         try:
