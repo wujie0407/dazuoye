@@ -93,12 +93,11 @@ with col_side:
     
     if st.session_state.drawing_data:
         data = st.session_state.drawing_data
-        
-        # 显示统计信息
-        stats = data.get('statistics', {})
+
+        stats = data.get('statistics', {}) if isinstance(data, dict) else {}
         st.metric("笔画数", stats.get('pathCount', 0))
         st.metric("总点数", stats.get('totalPoints', 0))
-        
+
         duration = stats.get('drawingDuration', 0)
         st.metric("绘制时长", f"{duration / 1000:.1f} 秒")
         
