@@ -92,29 +92,31 @@ with col_side:
     st.subheader("📊 数据信息")
     
     if st.session_state.drawing_data:
-        data = st.session_state.drawing_data
+        data = st.session_state.drawing_data if isinstance(st.session_state.drawing_data, dict) else None
 
-        stats = data.get('statistics', {}) if isinstance(data, dict) else {}
-        st.metric("笔画数", stats.get('pathCount', 0))
-        st.metric("总点数", stats.get('totalPoints', 0))
+        if data:
+            stats = data.get('statistics', {})
+            st.metric("笔画数", stats.get('pathCount', 0))
+            st.metric("总点数", stats.get('totalPoints', 0))
 
-        duration = stats.get('drawingDuration', 0)
-        st.metric("绘制时长", f"{duration / 1000:.1f} 秒")
-        
-        st.divider()
-        
-        # 图像预览
-        st.subheader("🖼️ 预览")
-        try:
-            image = ImageHandler.base64_to_image(data['image'])
-            st.image(image, use_container_width=True)
+            duration = stats.get('drawingDuration', 0)
+            st.metric("绘制时长", f"{duration / 1000:.1f} 秒")
             
-            # 显示图像信息
-            with st.expander("图像详情"):
-                info = ImageHandler.get_image_info(image)
-                st.json(info)
-        except Exception as e:
-            st.error(f"图像加载失败: {str(e)}")
+            st.divider()
+            
+            # 图像预览
+            st.subheader("🖼️ 预览")
+            try:
+                if 'image' in data:
+                    image = ImageHandler.base64_to_image(data['image'])
+                    st.image(image, use_container_width=True)
+                    
+                    # 显示图像信息
+                    with st.expander("图像详情"):
+                        info = ImageHandler.get_image_info(image)
+                        st.json(info)
+            except Exception as e:
+                st.error(f"图像加载失败: {str(e)}")
 
 # 底部操作区
 st.divider()
