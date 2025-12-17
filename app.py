@@ -144,18 +144,19 @@ if st.session_state.drawing_data:
             
         
         # 下载图像
-        try:
-            image = ImageHandler.base64_to_image(data['image'])
-            image_bytes = ImageHandler.image_to_bytes(image)
-            st.download_button(
-                label="📥 下载图像",
-                data=image_bytes,
-                file_name=f"drawing_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png",
-                mime="image/png",
-                use_container_width=True
-            )
-        except Exception as e:
-            st.error(f"图像处理失败: {str(e)}")
+        if data and 'image' in data:
+            try:
+                image = ImageHandler.base64_to_image(data['image'])
+                image_bytes = ImageHandler.image_to_bytes(image)
+                st.download_button(
+                    label="📥 下载图像",
+                    data=image_bytes,
+                    file_name=f"drawing_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png",
+                    mime="image/png",
+                    use_container_width=True
+                )
+            except Exception as e:
+                st.error(f"图像处理失败: {str(e)}")
     
     # JSONBin 上传
     with col2:
