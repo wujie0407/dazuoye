@@ -168,27 +168,32 @@ if st.session_state.drawing_data:
             if not api_key:
                 st.error("❌ 请先配置 API Key")
             else:
-                try:
-                    with st.spinner("上传中..."):
-                        service = JSONBinService(api_key)
-                        
-                        if bin_id:
-                            # 更新已有 Bin
-                            result = service.update_bin(bin_id, data)
-                            st.success(f"✅ 已更新 Bin: {bin_id}")
-                        else:
-                            # 创建新 Bin
-                            result = service.create_bin(data)
-                            new_bin_id = result['metadata']['id']
-                            st.success(f"✅ 已创建新 Bin")
-                            st.code(f"Bin ID: {new_bin_id}")
-                            st.info("💡 保存此 Bin ID 以便后续更新")
-                        
-                        with st.expander("查看响应"):
-                            st.json(result)
-                
-                except Exception as e:
-                    st.error(f"❌ 上传失败: {str(e)}")
+                # 修改点：从 session_state 获取数据
+                data = st.session_state.drawing_data if isinstance(st.session_state.drawing_data, dict) else None
+                if not data:
+                    st.error("❌ 没有可上传的数据，请先绘制并保存")
+                else:
+                    try:
+                        with st.spinner("上传中..."):
+                            service = JSONBinService(api_key)
+                            
+                            if bin_id:
+                                # 更新已有 Bin
+                                result = service.update_bin(bin_id, data)
+                                st.success(f"✅ 已更新 Bin: {bin_id}")
+                            else:
+                                # 创建新 Bin
+                                result = service.create_bin(data)
+                                new_bin_id = result['metadata']['id']
+                                st.success(f"✅ 已创建新 Bin")
+                                st.code(f"Bin ID: {new_bin_id}")
+                                st.info("💡 保存此 Bin ID 以便后续更新")
+                            
+                            with st.expander("查看响应"):
+                                st.json(result)
+                    
+                    except Exception as e:
+                        st.error(f"❌ 上传失败: {str(e)}")
     
     # 数据查看
     with col3:

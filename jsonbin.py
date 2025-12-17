@@ -42,20 +42,14 @@ class JSONBinService:
         """
         url = f"{self.BASE_URL}/b"
         
-        # 添加时间戳
-        upload_data = {
-            "data": data,
-            "uploaded_at": datetime.now().isoformat(),
-            "version": "1.0"
-        }
-        
         headers = self.headers.copy()
         if bin_name:
             headers["X-Bin-Name"] = bin_name
         else:
             headers["X-Bin-Name"] = f"drawing_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         
-        response = requests.post(url, json=upload_data, headers=headers)
+        # 修改点：直接发送 data，不要包装
+        response = requests.post(url, json=data, headers=headers)
         
         if response.status_code == 201:
             return response.json()
@@ -78,36 +72,13 @@ class JSONBinService:
         """
         url = f"{self.BASE_URL}/b/{bin_id}"
         
-        upload_data = {
-            "data": data,
-            "updated_at": datetime.now().isoformat(),
-            "version": "1.0"
-        }
-        
-        response = requests.put(url, json=upload_data, headers=self.headers)
+        # 修改点：直接发送 data，不要包装
+        response = requests.put(url, json=data, headers=self.headers)
         
         if response.status_code == 200:
             return response.json()
         else:
             raise Exception(f"更新失败: {response.status_code} - {response.text}")
-    
-    def read_bin(self, bin_id: str) -> Dict[str, Any]:
-        """
-        读取 Bin 数据
-        
-        Args:
-            bin_id: Bin ID
-            
-        Returns:
-            Bin 中存储的数据
-        """
-        url = f"{self.BASE_URL}/b/{bin_id}/latest"
-        response = requests.get(url, headers=self.headers)
-        
-        if response.status_code == 200:
-            return response.json()
-        else:
-            raise Exception(f"读取失败: {response.status_code} - {response.text}")
     
     def delete_bin(self, bin_id: str) -> bool:
         """
