@@ -21,7 +21,7 @@ st.set_page_config(
 # ==========================================
 # 直接设置 API Key（临时方案）
 # ==========================================
-API_KEY = "$2a$10$pleOacf0lQU1mvIU//jjfeYPUCb.kdFXX.08qupD/90UYKwHtU8e."
+API_KEY = "$2a$10$pleOacf0lQu1mvIU//jjfeYPUCb.kiFXX.08qupD/90UYKwHtU8e."
 BIN_ID = ""
 
 # 初始化 session state
