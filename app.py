@@ -78,8 +78,7 @@ with col_main:
         bg_color=bg_color
     )
     
-    # 修改点：添加 key 参数保持状态
-    drawing_data = components.html(canvas_html, height=canvas_height + 200, key="canvas_component")
+    drawing_data = components.html(canvas_html, height=canvas_height + 200)
     
     # 处理接收到的绘图数据
     if drawing_data:
@@ -91,9 +90,8 @@ with col_main:
             else:
                 data = None
             
-            if data:
+            if data and isinstance(data, dict):
                 st.session_state.drawing_data = data
-                st.rerun()  # 强制刷新以更新 UI
         except (json.JSONDecodeError, TypeError) as e:
             st.error(f"❌ 数据解析失败: {str(e)}")
 
@@ -131,19 +129,15 @@ with col_side:
 st.divider()
 
 if st.session_state.drawing_data:
-    col1, col2, col3 = st.columns(3)
+    data = st.session_state.drawing_data if isinstance(st.session_state.drawing_data, dict) else None
     
-    # 下载选项
-    with col1:
-        st.subheader("💾 本地保存")
+    if data:
+        col1, col2, col3 = st.columns(3)
         
-        data = st.session_state.drawing_data
-        
-        # 下载 JSON
-    if st.session_state.drawing_data:
-        data = st.session_state.drawing_data if isinstance(st.session_state.drawing_data, dict) else None
-
-        if data:
+        # 下载选项
+        with col1:
+            st.subheader("💾 本地保存")
+            
             json_str = json.dumps(data, indent=2, ensure_ascii=False)
             st.download_button(
                 label="📥 下载 JSON",
@@ -153,63 +147,60 @@ if st.session_state.drawing_data:
                 use_container_width=True
             )
             
+            # 下载图像
+            if 'image' in data:
+                try:
+                    image = ImageHandler.base64_to_image(data['image'])
+                    image_bytes = ImageHandler.image_to_bytes(image)
+                    st.download_button(
+                        label="📥 下载图像",
+                        data=image_bytes,
+                        file_name=f"drawing_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png",
+                        mime="image/png",
+                        use_container_width=True
+                    )
+                except Exception as e:
+                    st.error(f"图像处理失败: {str(e)}")
         
-        # 下载图像
-        if data and 'image' in data:
-            try:
-                image = ImageHandler.base64_to_image(data['image'])
-                image_bytes = ImageHandler.image_to_bytes(image)
-                st.download_button(
-                    label="📥 下载图像",
-                    data=image_bytes,
-                    file_name=f"drawing_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png",
-                    mime="image/png",
-                    use_container_width=True
-                )
-            except Exception as e:
-                st.error(f"图像处理失败: {str(e)}")
-    
-    # JSONBin 上传
-    with col2:
-        st.subheader("☁️ 云端上传")
-        
-        if st.button("🚀 上传到 JSONBin", type="primary", use_container_width=True):
-            if not api_key:
-                st.error("❌ 请先配置 API Key")
-            else:
-                # 修改点：从 session_state 获取数据
-                data = st.session_state.drawing_data if isinstance(st.session_state.drawing_data, dict) else None
-                if not data:
-                    st.error("❌ 没有可上传的数据，请先绘制并保存")
+        # JSONBin 上传
+        with col2:
+            st.subheader("☁️ 云端上传")
+            
+            if st.button("🚀 上传到 JSONBin", type="primary", use_container_width=True):
+                if not api_key:
+                    st.error("❌ 请先配置 API Key")
                 else:
-                    try:
-                        with st.spinner("上传中..."):
-                            service = JSONBinService(api_key)
-                            
-                            if bin_id:
-                                # 更新已有 Bin
-                                result = service.update_bin(bin_id, data)
-                                st.success(f"✅ 已更新 Bin: {bin_id}")
-                            else:
-                                # 创建新 Bin
-                                result = service.create_bin(data)
-                                new_bin_id = result['metadata']['id']
-                                st.success(f"✅ 已创建新 Bin")
-                                st.code(f"Bin ID: {new_bin_id}")
-                                st.info("💡 保存此 Bin ID 以便后续更新")
-                            
-                            with st.expander("查看响应"):
-                                st.json(result)
-                    
-                    except Exception as e:
-                        st.error(f"❌ 上传失败: {str(e)}")
-    
-    # 数据查看
-    with col3:
-        st.subheader("🔍 数据查看")
+                    if not data:
+                        st.error("❌ 没有可上传的数据，请先绘制并保存")
+                    else:
+                        try:
+                            with st.spinner("上传中..."):
+                                service = JSONBinService(api_key)
+                                
+                                if bin_id:
+                                    # 更新已有 Bin
+                                    result = service.update_bin(bin_id, data)
+                                    st.success(f"✅ 已更新 Bin: {bin_id}")
+                                else:
+                                    # 创建新 Bin
+                                    result = service.create_bin(data)
+                                    new_bin_id = result['metadata']['id']
+                                    st.success(f"✅ 已创建新 Bin")
+                                    st.code(f"Bin ID: {new_bin_id}")
+                                    st.info("💡 保存此 Bin ID 以便后续更新")
+                                
+                                with st.expander("查看响应"):
+                                    st.json(result)
+                        
+                        except Exception as e:
+                            st.error(f"❌ 上传失败: {str(e)}")
         
-        if st.button("📖 查看完整数据", use_container_width=True):
-            st.json(st.session_state.drawing_data)
+        # 数据查看
+        with col3:
+            st.subheader("🔍 数据查看")
+            
+            if st.button("📖 查看完整数据", use_container_width=True):
+                st.json(st.session_state.drawing_data)
 
 else:
     st.info("👆 请在画布上绘制，然后点击'保存并上传'按钮")

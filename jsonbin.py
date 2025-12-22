@@ -97,7 +97,7 @@ class JSONBinService:
     @staticmethod
     def validate_api_key(api_key: str) -> bool:
         """
-        验证 API Key 是否有效
+        验证 API Key 格式是否有效（简单验证）
         
         Args:
             api_key: 要验证的 API Key
@@ -105,12 +105,12 @@ class JSONBinService:
         Returns:
             是否有效
         """
-        if not api_key or api_key == "YOUR_API_KEY_HERE":
+        if not api_key:
             return False
         
-        try:
-            headers = {"X-Master-Key": api_key}
-            response = requests.get(f"{JSONBinService.BASE_URL}/b", headers=headers)
-            return response.status_code in [200, 401]  # 401 说明 key 格式正确但可能无权限
-        except:
+        # JSONBin API Key 通常是 32 位字符串
+        if len(api_key) < 20:
             return False
+        
+        # 只验证格式，实际有效性在上传时验证
+        return True
