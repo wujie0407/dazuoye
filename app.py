@@ -20,14 +20,70 @@ st.set_page_config(
     layout="wide"
 )
 
-# 从 secrets 加载配置
-try:
-    API_KEY = st.secrets["JSONBIN_API_KEY"]
-    BIN_ID = st.secrets.get("JSONBIN_BIN_ID", "")
-except Exception as e:
-    st.error(f"❌ 无法加载配置: {str(e)}")
-    st.info("请确保 secrets.toml 文件包含 JSONBIN_API_KEY")
-    st.stop()
+# 从 secrets 加载配置（带容错处理）
+def load_config():
+    """尝试从 secrets 加载配置，如果失败则返回 None"""
+    try:
+        api_key = st.secrets["JSONBIN_API_KEY"]
+        bin_id = st.secrets.get("JSONBIN_BIN_ID", "")
+        return api_key, bin_id, True
+    except:
+        return None, None, False
+
+API_KEY, BIN_ID, config_loaded = load_config()
+
+# 如果没有加载到配置，显示输入框
+if not config_loaded:
+    st.error("❌ 未找到 secrets.toml 配置文件")
+    
+    with st.expander("📝 配置说明", expanded=True):
+        st.markdown("""
+        ### 方法 1: 创建 secrets.toml（推荐）
+        
+        1. 在项目根目录创建 `.streamlit` 文件夹
+        2. 在 `.streamlit` 文件夹中创建 `secrets.toml` 文件
+        3. 添加以下内容：
+        
+        ```toml
+        JSONBIN_API_KEY = "你的Master_Key"
+        JSONBIN_BIN_ID = ""
+        ```
+        
+        4. 重启 Streamlit 应用
+        
+        ---
+        
+        ### 方法 2: 临时输入（快速测试）
+        
+        在下方输入框中输入 API Key 即可使用（仅当前会话有效）
+        """)
+    
+    # 临时输入框
+    st.subheader("🔑 临时 API Key 输入")
+    
+    if 'temp_api_key' not in st.session_state:
+        st.session_state.temp_api_key = ""
+    
+    temp_api_key = st.text_input(
+        "Master API Key",
+        type="password",
+        value=st.session_state.temp_api_key,
+        help="输入你的 JSONBin Master Key",
+        placeholder="$2a$10$..."
+    )
+    
+    if temp_api_key:
+        st.session_state.temp_api_key = temp_api_key
+        API_KEY = temp_api_key
+        BIN_ID = ""
+        st.success("✅ 已设置临时 API Key，可以开始使用了！")
+        st.info("💡 刷新页面后需要重新输入，建议创建 secrets.toml 文件")
+    else:
+        st.warning("⚠️ 请在上方输入 API Key 才能使用应用")
+        st.stop()
+else:
+    # 成功加载配置
+    pass
 
 # 初始化 session state
 if 'drawing_data' not in st.session_state:
@@ -41,6 +97,40 @@ if 'auto_upload' not in st.session_state:
 
 # 标题
 st.title("🎨 手绘画板 - 自动云端存储")
+
+# 定义上传函数（必须在使用之前定义）
+def upload_to_jsonbin(data):
+    """自动上传到 JSONBin"""
+    try:
+        service = JSONBinService(API_KEY)
+        
+        if st.session_state.current_bin_id:
+            # 更新已有 Bin
+            try:
+                result = service.update_bin(st.session_state.current_bin_id, data)
+                st.success(f"✅ 已更新到 Bin: {st.session_state.current_bin_id}")
+                st.session_state.last_upload_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            except Exception as update_error:
+                # 如果 404，创建新的
+                if "404" in str(update_error):
+                    result = service.create_bin(data)
+                    new_bin_id = result['metadata']['id']
+                    st.session_state.current_bin_id = new_bin_id
+                    st.success(f"✅ 已创建新 Bin: {new_bin_id}")
+                    st.session_state.last_upload_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                else:
+                    raise
+        else:
+            # 创建新 Bin
+            result = service.create_bin(data)
+            new_bin_id = result['metadata']['id']
+            st.session_state.current_bin_id = new_bin_id
+            st.success(f"✅ 已创建新 Bin: {new_bin_id}")
+            st.info("💡 Bin ID 已保存，下次会自动更新到同一个 Bin")
+            st.session_state.last_upload_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            
+    except Exception as e:
+        st.error(f"❌ 上传失败: {str(e)}")
 
 # 侧边栏配置
 with st.sidebar:
@@ -153,40 +243,6 @@ with col_side:
                     st.image(image, use_container_width=True)
             except Exception as e:
                 st.error(f"图像加载失败: {str(e)}")
-
-# 自动上传函数
-def upload_to_jsonbin(data):
-    """自动上传到 JSONBin"""
-    try:
-        service = JSONBinService(API_KEY)
-        
-        if st.session_state.current_bin_id:
-            # 更新已有 Bin
-            try:
-                result = service.update_bin(st.session_state.current_bin_id, data)
-                st.success(f"✅ 已更新到 Bin: {st.session_state.current_bin_id}")
-                st.session_state.last_upload_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            except Exception as update_error:
-                # 如果 404，创建新的
-                if "404" in str(update_error):
-                    result = service.create_bin(data)
-                    new_bin_id = result['metadata']['id']
-                    st.session_state.current_bin_id = new_bin_id
-                    st.success(f"✅ 已创建新 Bin: {new_bin_id}")
-                    st.session_state.last_upload_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                else:
-                    raise
-        else:
-            # 创建新 Bin
-            result = service.create_bin(data)
-            new_bin_id = result['metadata']['id']
-            st.session_state.current_bin_id = new_bin_id
-            st.success(f"✅ 已创建新 Bin: {new_bin_id}")
-            st.info("💡 Bin ID 已保存，下次会自动更新到同一个 Bin")
-            st.session_state.last_upload_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            
-    except Exception as e:
-        st.error(f"❌ 上传失败: {str(e)}")
 
 # 底部操作区
 st.divider()
