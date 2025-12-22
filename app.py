@@ -78,22 +78,29 @@ with col_main:
         bg_color=bg_color
     )
     
-    drawing_data = components.html(canvas_html, height=canvas_height + 200)
+    components.html(canvas_html, height=canvas_height + 200)
     
-    # 处理接收到的绘图数据
-    if drawing_data:
+    # 数据上传区域（用于接收从画布保存后下载的 JSON 文件）
+    st.info("💡 在画布上绘制完成后，点击画布中的'保存并上传'按钮，会自动下载 JSON 文件。然后在此上传该文件。")
+    uploaded_json = st.file_uploader(
+        "📤 上传保存的 JSON 文件",
+        type=['json'],
+        key="json_uploader",
+        help="从画布保存后下载的 JSON 文件"
+    )
+    
+    if uploaded_json is not None:
         try:
-            if isinstance(drawing_data, str):
-                data = json.loads(drawing_data)
-            elif isinstance(drawing_data, dict):
-                data = drawing_data
-            else:
-                data = None
-            
-            if data and isinstance(data, dict):
+            data = json.load(uploaded_json)
+            if isinstance(data, dict) and 'image' in data:
                 st.session_state.drawing_data = data
-        except (json.JSONDecodeError, TypeError) as e:
-            st.error(f"❌ 数据解析失败: {str(e)}")
+                st.success("✅ 数据已加载！可以查看右侧预览或上传到 JSONBin。")
+            else:
+                st.error("❌ JSON 文件格式不正确，缺少必要字段")
+        except json.JSONDecodeError as e:
+            st.error(f"❌ JSON 文件解析失败: {str(e)}")
+        except Exception as e:
+            st.error(f"❌ 读取文件失败: {str(e)}")
 
 with col_side:
     st.subheader("📊 数据信息")
@@ -212,10 +219,12 @@ with st.expander("📖 使用指南"):
     
     1. **调整设置**：在左侧边栏配置画笔和画布
     2. **开始绘画**：在画布上自由创作
-    3. **保存作品**：点击"保存并上传"按钮
-    4. **选择操作**：
-       - 本地保存：下载 JSON 或图像文件
-       - 云端上传：上传到 JSONBin 永久保存
+    3. **保存作品**：点击画布中的"💾 保存并上传"按钮（会自动下载 JSON 文件）
+    4. **上传数据**：在绘图区域下方的"📤 上传保存的 JSON 文件"处上传刚下载的 JSON 文件
+    5. **查看和操作**：
+       - 右侧面板会显示绘图统计和预览
+       - 底部可以下载 JSON/图像文件
+       - 可以上传到 JSONBin 云端保存
     
     ### JSONBin 设置
     

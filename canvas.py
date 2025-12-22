@@ -283,11 +283,28 @@ function saveDrawing() {{
         }}
     }};
     
-    // 发送数据到 Streamlit
-    window.parent.postMessage({{
-        type: 'streamlit:setComponentValue',
-        value: JSON.stringify(drawingData)
-    }}, '*');
+    // 将数据转换为 JSON 字符串
+    const dataStr = JSON.stringify(drawingData);
+    
+    // 创建下载链接
+    const blob = new Blob([dataStr], {{ type: 'application/json' }});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'drawing_' + new Date().getTime() + '.json';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    
+    // 同时存储到 sessionStorage，以便页面内使用
+    try {{
+        sessionStorage.setItem('drawing_data', dataStr);
+        alert('✅ 数据已保存并下载！\\n\\n请使用页面上方的"数据上传"功能上传 JSON 文件。');
+    }} catch(e) {{
+        console.error('保存到 sessionStorage 失败:', e);
+        alert('✅ 数据已下载！\\n\\n请使用页面上方的"数据上传"功能上传 JSON 文件。');
+    }}
 }}
 
 // 初始化统计
