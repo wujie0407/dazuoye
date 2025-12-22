@@ -32,7 +32,7 @@ class JSONBinService:
         
         Args:
             data: 要存储的数据
-            bin_name: Bin 名称（可选）
+            bin_name: Bin 名称(可选)
             
         Returns:
             API 响应数据
@@ -44,7 +44,7 @@ class JSONBinService:
         
         # 验证数据是字典
         if not isinstance(data, dict):
-            raise Exception(f"数据必须是字典格式，当前类型: {type(data)}")
+            raise Exception(f"数据必须是字典格式,当前类型: {type(data)}")
         
         # 尝试序列化验证
         try:
@@ -86,11 +86,12 @@ class JSONBinService:
         Raises:
             Exception: 更新失败时抛出异常
         """
-        url = f"{self.BASE_URL}/b/{bin_id}"
+        # ✅ 修复: 使用正确的 /bins/ 端点
+        url = f"{self.BASE_URL}/bins/{bin_id}"
         
         # 验证数据是字典
         if not isinstance(data, dict):
-            raise Exception(f"数据必须是字典格式，当前类型: {type(data)}")
+            raise Exception(f"数据必须是字典格式,当前类型: {type(data)}")
         
         # 尝试序列化验证
         try:
@@ -122,14 +123,15 @@ class JSONBinService:
         Returns:
             是否删除成功
         """
-        url = f"{self.BASE_URL}/b/{bin_id}"
+        # ✅ 修复: 使用正确的 /bins/ 端点
+        url = f"{self.BASE_URL}/bins/{bin_id}"
         response = requests.delete(url, headers=self.headers)
         return response.status_code == 200
     
     @staticmethod
     def validate_api_key(api_key: str) -> bool:
         """
-        验证 API Key 格式是否有效（简单验证）
+        验证 API Key 格式是否有效(简单验证)
         
         Args:
             api_key: 要验证的 API Key
@@ -144,5 +146,5 @@ class JSONBinService:
         if len(api_key) < 20:
             return False
         
-        # 只验证格式，实际有效性在上传时验证
+        # 只验证格式,实际有效性在上传时验证
         return True
