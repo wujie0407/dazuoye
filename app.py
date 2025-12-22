@@ -173,24 +173,40 @@ if st.session_state.drawing_data:
         with col2:
             st.subheader("☁️ 云端上传")
             
+            # 显示当前数据状态
+            if data:
+                data_size = len(json.dumps(data))
+                st.caption(f"数据大小: {data_size:,} 字符")
+            
             if st.button("🚀 上传到 JSONBin", type="primary", use_container_width=True):
                 if not api_key:
                     st.error("❌ 请先配置 API Key")
                 else:
-                    if not data:
-                        st.error("❌ 没有可上传的数据，请先绘制并保存")
+                    # 确保从 session_state 获取最新数据
+                    upload_data = st.session_state.drawing_data if isinstance(st.session_state.drawing_data, dict) else None
+                    
+                    if not upload_data:
+                        st.error("❌ 没有可上传的数据")
+                        st.info("💡 请先上传 JSON 文件（在绘图区域下方）")
                     else:
                         try:
                             with st.spinner("上传中..."):
                                 service = JSONBinService(api_key)
                                 
+                                # 检查数据大小
+                                data_str = json.dumps(upload_data)
+                                if len(data_str) > 1000000:  # 1MB
+                                    st.warning("⚠️ 数据较大，上传可能需要一些时间...")
+                                
                                 if bin_id:
                                     # 更新已有 Bin
-                                    result = service.update_bin(bin_id, data)
+                                    st.write(f"正在更新 Bin: {bin_id}...")
+                                    result = service.update_bin(bin_id, upload_data)
                                     st.success(f"✅ 已更新 Bin: {bin_id}")
                                 else:
                                     # 创建新 Bin
-                                    result = service.create_bin(data)
+                                    st.write("正在创建新 Bin...")
+                                    result = service.create_bin(upload_data)
                                     new_bin_id = result['metadata']['id']
                                     st.success(f"✅ 已创建新 Bin")
                                     st.code(f"Bin ID: {new_bin_id}")
@@ -201,6 +217,9 @@ if st.session_state.drawing_data:
                         
                         except Exception as e:
                             st.error(f"❌ 上传失败: {str(e)}")
+                            import traceback
+                            with st.expander("查看详细错误信息"):
+                                st.code(traceback.format_exc())
         
         # 数据查看
         with col3:

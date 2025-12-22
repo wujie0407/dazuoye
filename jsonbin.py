@@ -42,19 +42,35 @@ class JSONBinService:
         """
         url = f"{self.BASE_URL}/b"
         
+        # 验证数据是字典
+        if not isinstance(data, dict):
+            raise Exception(f"数据必须是字典格式，当前类型: {type(data)}")
+        
+        # 尝试序列化验证
+        try:
+            import json as json_lib
+            json_lib.dumps(data)
+        except TypeError as e:
+            raise Exception(f"数据包含不可序列化的对象: {str(e)}")
+        
         headers = self.headers.copy()
         if bin_name:
             headers["X-Bin-Name"] = bin_name
         else:
             headers["X-Bin-Name"] = f"drawing_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         
-        # 修改点：直接发送 data，不要包装
         response = requests.post(url, json=data, headers=headers)
         
         if response.status_code == 201:
             return response.json()
         else:
-            raise Exception(f"创建失败: {response.status_code} - {response.text}")
+            error_msg = response.text
+            try:
+                error_json = response.json()
+                error_msg = error_json.get('message', error_msg)
+            except:
+                pass
+            raise Exception(f"创建失败 ({response.status_code}): {error_msg}")
     
     def update_bin(self, bin_id: str, data: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -72,13 +88,29 @@ class JSONBinService:
         """
         url = f"{self.BASE_URL}/b/{bin_id}"
         
-        # 修改点：直接发送 data，不要包装
+        # 验证数据是字典
+        if not isinstance(data, dict):
+            raise Exception(f"数据必须是字典格式，当前类型: {type(data)}")
+        
+        # 尝试序列化验证
+        try:
+            import json as json_lib
+            json_lib.dumps(data)
+        except TypeError as e:
+            raise Exception(f"数据包含不可序列化的对象: {str(e)}")
+        
         response = requests.put(url, json=data, headers=self.headers)
         
         if response.status_code == 200:
             return response.json()
         else:
-            raise Exception(f"更新失败: {response.status_code} - {response.text}")
+            error_msg = response.text
+            try:
+                error_json = response.json()
+                error_msg = error_json.get('message', error_msg)
+            except:
+                pass
+            raise Exception(f"更新失败 ({response.status_code}): {error_msg}")
     
     def delete_bin(self, bin_id: str) -> bool:
         """
