@@ -79,7 +79,7 @@ class JSONBinService:
         
         print(f"[DEBUG] 响应状态: {response.status_code}")
         
-        if response.status_code == 201:
+        if response.status_code in [200, 201]:  # 接受 200 或 201
             return response.json()
         else:
             error_msg = response.text
