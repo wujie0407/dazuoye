@@ -66,10 +66,10 @@ with st.sidebar:
 # 主内容区域
 col_main, col_side = st.columns([2, 1])
 
+# 在 app.py 中，修改绘图区域部分
 with col_main:
     st.subheader("🖌️ 绘图区域")
     
-    # 生成并渲染 Canvas
     canvas_html = CanvasComponent.generate_html(
         width=canvas_width,
         height=canvas_height,
@@ -78,15 +78,24 @@ with col_main:
         bg_color=bg_color
     )
     
-    drawing_data = components.html(canvas_html, height=canvas_height + 200)
+    # 修改点：添加 key 参数保持状态
+    drawing_data = components.html(canvas_html, height=canvas_height + 200, key="canvas_component")
     
     # 处理接收到的绘图数据
     if drawing_data:
         try:
-            data = json.loads(drawing_data) if isinstance(drawing_data, str) else drawing_data
-            st.session_state.drawing_data = data
-        except json.JSONDecodeError:
-            st.error("❌ 数据解析失败")
+            if isinstance(drawing_data, str):
+                data = json.loads(drawing_data)
+            elif isinstance(drawing_data, dict):
+                data = drawing_data
+            else:
+                data = None
+            
+            if data:
+                st.session_state.drawing_data = data
+                st.rerun()  # 强制刷新以更新 UI
+        except (json.JSONDecodeError, TypeError) as e:
+            st.error(f"❌ 数据解析失败: {str(e)}")
 
 with col_side:
     st.subheader("📊 数据信息")
