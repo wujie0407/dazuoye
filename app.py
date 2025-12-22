@@ -1,13 +1,11 @@
 """
-手绘画板 Streamlit 应用 - 优化版
-自动从 secrets 读取配置，绘制完成后自动上传
+手绘画板 Streamlit 应用 - 简化版（内置配置）
 """
 
 import streamlit as st
 import streamlit.components.v1 as components
 import json
 from datetime import datetime
-import time
 
 from canvas import CanvasComponent
 from jsonbin import JSONBinService
@@ -20,70 +18,11 @@ st.set_page_config(
     layout="wide"
 )
 
-# 从 secrets 加载配置（带容错处理）
-def load_config():
-    """尝试从 secrets 加载配置，如果失败则返回 None"""
-    try:
-        api_key = st.secrets["JSONBIN_API_KEY"]
-        bin_id = st.secrets.get("JSONBIN_BIN_ID", "")
-        return api_key, bin_id, True
-    except:
-        return None, None, False
-
-API_KEY, BIN_ID, config_loaded = load_config()
-
-# 如果没有加载到配置，显示输入框
-if not config_loaded:
-    st.error("❌ 未找到 secrets.toml 配置文件")
-    
-    with st.expander("📝 配置说明", expanded=True):
-        st.markdown("""
-        ### 方法 1: 创建 secrets.toml（推荐）
-        
-        1. 在项目根目录创建 `.streamlit` 文件夹
-        2. 在 `.streamlit` 文件夹中创建 `secrets.toml` 文件
-        3. 添加以下内容：
-        
-        ```toml
-        JSONBIN_API_KEY = "你的Master_Key"
-        JSONBIN_BIN_ID = ""
-        ```
-        
-        4. 重启 Streamlit 应用
-        
-        ---
-        
-        ### 方法 2: 临时输入（快速测试）
-        
-        在下方输入框中输入 API Key 即可使用（仅当前会话有效）
-        """)
-    
-    # 临时输入框
-    st.subheader("🔑 临时 API Key 输入")
-    
-    if 'temp_api_key' not in st.session_state:
-        st.session_state.temp_api_key = ""
-    
-    temp_api_key = st.text_input(
-        "Master API Key",
-        type="password",
-        value=st.session_state.temp_api_key,
-        help="输入你的 JSONBin Master Key",
-        placeholder="$2a$10$..."
-    )
-    
-    if temp_api_key:
-        st.session_state.temp_api_key = temp_api_key
-        API_KEY = temp_api_key
-        BIN_ID = ""
-        st.success("✅ 已设置临时 API Key，可以开始使用了！")
-        st.info("💡 刷新页面后需要重新输入，建议创建 secrets.toml 文件")
-    else:
-        st.warning("⚠️ 请在上方输入 API Key 才能使用应用")
-        st.stop()
-else:
-    # 成功加载配置
-    pass
+# ==========================================
+# 直接设置 API Key（临时方案）
+# ==========================================
+API_KEY = "$2a$10$pleOacf0lQU1mvIU//jjfeYPUCb.kdFXX.08qupD/90UYKwHtU8e."
+BIN_ID = ""
 
 # 初始化 session state
 if 'drawing_data' not in st.session_state:
@@ -98,7 +37,7 @@ if 'auto_upload' not in st.session_state:
 # 标题
 st.title("🎨 手绘画板 - 自动云端存储")
 
-# 定义上传函数（必须在使用之前定义）
+# 定义上传函数
 def upload_to_jsonbin(data):
     """自动上传到 JSONBin"""
     try:
@@ -131,6 +70,9 @@ def upload_to_jsonbin(data):
             
     except Exception as e:
         st.error(f"❌ 上传失败: {str(e)}")
+        import traceback
+        with st.expander("查看详细错误"):
+            st.code(traceback.format_exc())
 
 # 侧边栏配置
 with st.sidebar:
@@ -192,9 +134,9 @@ with col_main:
     
     components.html(canvas_html, height=canvas_height + 100)
     
-    st.info("💡 在画布上绘制完成后，数据会自动保存到右侧面板")
+    st.info("💡 在画布上绘制完成后，点击'保存'按钮，数据会自动保存")
     
-    # 数据接收区域（隐藏的）
+    # 数据接收区域
     uploaded_json = st.file_uploader(
         "📤 或手动上传 JSON 文件",
         type=['json'],
@@ -303,34 +245,19 @@ else:
 # 使用说明
 with st.expander("📖 使用指南"):
     st.markdown("""
-    ### 🚀 快速开始（全自动）
+    ### 🚀 使用步骤
     
     1. **开始绘画**：在画布上自由创作
-    2. **点击"保存"**：点击画布下方的"💾 保存"按钮
-    3. **自动上传**：系统会自动将作品上传到云端
-    4. **实时预览**：右侧面板实时显示统计和预览
-    
-    ### ⚙️ 功能说明
-    
-    - **自动上传**：默认启用，可在左侧边栏关闭
-    - **智能 Bin 管理**：
-      - 第一次上传会创建新 Bin
-      - 后续上传会自动更新到同一个 Bin
-      - Bin ID 会自动保存
-    - **手动上传**：关闭自动上传后，可使用底部"立即上传"按钮
-    - **本地保存**：随时可以下载 JSON 或图像文件
-    
-    ### 📝 配置说明
-    
-    API Key 和 Bin ID 从 `secrets.toml` 自动读取：
-    ```toml
-    JSONBIN_API_KEY = "你的Master_Key"
-    JSONBIN_BIN_ID = ""  # 留空让系统自动创建
-    ```
+    2. **点击保存**：点击画布下方的"💾 保存"按钮
+    3. **自动处理**：
+       - JSON 文件会自动下载
+       - 数据会自动上传到云端（如果启用）
+    4. **查看结果**：右侧面板显示统计和预览
     
     ### 💡 提示
     
     - 绘制时可以随时撤销和清空
     - 支持鼠标和触摸屏绘制
     - 自动保存的 Bin ID 会显示在左侧边栏
+    - 可以下载 JSON 和图像文件
     """)
