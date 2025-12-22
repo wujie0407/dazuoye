@@ -1,6 +1,6 @@
 """
-Canvas 绘图组件
-负责生成前端 HTML/JavaScript 代码
+Canvas 绘图组件 - 优化版
+支持自动上传功能
 """
 
 from typing import Dict
@@ -18,7 +18,23 @@ class CanvasComponent:
         bg_color: str = "#FFFFFF"
     ) -> str:
         """
-        生成 Canvas HTML 代码
+        生成 Canvas HTML 代码（原始版本）
+        """
+        return CanvasComponent.generate_html_with_auto_upload(
+            width, height, pen_color, pen_width, bg_color, auto_upload=False
+        )
+    
+    @staticmethod
+    def generate_html_with_auto_upload(
+        width: int = 800,
+        height: int = 600,
+        pen_color: str = "#000000",
+        pen_width: int = 3,
+        bg_color: str = "#FFFFFF",
+        auto_upload: bool = True
+    ) -> str:
+        """
+        生成带自动上传功能的 Canvas HTML 代码
         
         Args:
             width: 画布宽度
@@ -26,10 +42,13 @@ class CanvasComponent:
             pen_color: 笔触颜色
             pen_width: 笔触宽度
             bg_color: 背景颜色
+            auto_upload: 是否启用自动上传
             
         Returns:
             HTML 字符串
         """
+        auto_upload_js = "true" if auto_upload else "false"
+        
         return f"""
 <!DOCTYPE html>
 <html>
@@ -100,12 +119,21 @@ class CanvasComponent:
         transform: translateY(0);
     }}
     
+    button:disabled {{
+        opacity: 0.5;
+        cursor: not-allowed;
+    }}
+    
     #clearBtn {{
         background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
     }}
     
     #undoBtn {{
         background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+    }}
+    
+    #saveBtn {{
+        background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%);
     }}
     
     .info {{
@@ -123,6 +151,16 @@ class CanvasComponent:
         margin: 10px 5px;
         font-size: 13px;
     }}
+    
+    .success {{
+        background: #43e97b;
+        color: white;
+    }}
+    
+    .error {{
+        background: #f5576c;
+        color: white;
+    }}
 </style>
 </head>
 <body>
@@ -131,17 +169,20 @@ class CanvasComponent:
     <div class="controls">
         <button onclick="undoLastPath()" id="undoBtn">↶ 撤销</button>
         <button onclick="clearCanvas()" id="clearBtn">🗑️ 清空</button>
-        <button onclick="saveDrawing()">💾 保存并上传</button>
+        <button onclick="saveDrawing()" id="saveBtn">💾 保存</button>
     </div>
     <div class="info">
         <span class="status" id="pathCount">笔画数: 0</span>
         <span class="status" id="pointCount">点数: 0</span>
+        <span class="status" id="uploadStatus"></span>
     </div>
 </div>
 
 <script>
 const canvas = document.getElementById('canvas');
 const ctx = canvas.getContext('2d');
+const AUTO_UPLOAD = {auto_upload_js};
+
 let drawing = false;
 let paths = [];
 let currentPath = [];
@@ -214,11 +255,14 @@ function stopDrawing() {{
 }}
 
 function clearCanvas() {{
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    paths = [];
-    currentPath = [];
-    totalPoints = 0;
-    updateStats();
+    if (confirm('确定要清空画布吗？')) {{
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        paths = [];
+        currentPath = [];
+        totalPoints = 0;
+        updateStats();
+        updateUploadStatus('');
+    }}
 }}
 
 function undoLastPath() {{
@@ -249,66 +293,106 @@ function updateStats() {{
     document.getElementById('pointCount').textContent = `点数: ${{totalPoints}}`;
 }}
 
+function updateUploadStatus(message, isError = false) {{
+    const statusEl = document.getElementById('uploadStatus');
+    statusEl.textContent = message;
+    statusEl.className = 'status';
+    if (message) {{
+        statusEl.className += isError ? ' error' : ' success';
+    }}
+}}
+
 function saveDrawing() {{
     if (paths.length === 0) {{
         alert('画布为空，请先绘制内容！');
         return;
     }}
     
-    // 获取 Base64 图像数据
-    const imageData = canvas.toDataURL('image/png');
+    // 禁用保存按钮
+    const saveBtn = document.getElementById('saveBtn');
+    saveBtn.disabled = true;
+    saveBtn.textContent = '保存中...';
     
-    // 计算绘制时长
-    const timestamps = paths.flat().map(p => p.timestamp);
-    const duration = timestamps.length > 0 
-        ? Math.max(...timestamps) - Math.min(...timestamps)
-        : 0;
-    
-    // 准备发送的数据
-    const drawingData = {{
-        image: imageData,
-        paths: paths,
-        statistics: {{
-            pathCount: paths.length,
-            totalPoints: totalPoints,
-            drawingDuration: duration
-        }},
-        metadata: {{
-            width: canvas.width,
-            height: canvas.height,
-            penColor: '{pen_color}',
-            penWidth: {pen_width},
-            backgroundColor: '{bg_color}',
-            timestamp: new Date().toISOString()
-        }}
-    }};
-    
-    // 将数据转换为 JSON 字符串
-    const dataStr = JSON.stringify(drawingData);
-    
-    // 创建下载链接
-    const blob = new Blob([dataStr], {{ type: 'application/json' }});
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'drawing_' + new Date().getTime() + '.json';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-    
-    // 同时存储到 sessionStorage，以便页面内使用
     try {{
-        sessionStorage.setItem('drawing_data', dataStr);
-        alert('✅ 数据已保存并下载！\\n\\n请使用页面上方的"数据上传"功能上传 JSON 文件。');
-    }} catch(e) {{
-        console.error('保存到 sessionStorage 失败:', e);
-        alert('✅ 数据已下载！\\n\\n请使用页面上方的"数据上传"功能上传 JSON 文件。');
+        // 获取 Base64 图像数据
+        const imageData = canvas.toDataURL('image/png');
+        
+        // 计算绘制时长
+        const timestamps = paths.flat().map(p => p.timestamp);
+        const duration = timestamps.length > 0 
+            ? Math.max(...timestamps) - Math.min(...timestamps)
+            : 0;
+        
+        // 准备发送的数据
+        const drawingData = {{
+            image: imageData,
+            paths: paths,
+            statistics: {{
+                pathCount: paths.length,
+                totalPoints: totalPoints,
+                drawingDuration: duration
+            }},
+            metadata: {{
+                width: canvas.width,
+                height: canvas.height,
+                penColor: '{pen_color}',
+                penWidth: {pen_width},
+                backgroundColor: '{bg_color}',
+                timestamp: new Date().toISOString()
+            }}
+        }};
+        
+        // 将数据转换为 JSON 字符串
+        const dataStr = JSON.stringify(drawingData);
+        
+        // 创建下载链接
+        const blob = new Blob([dataStr], {{ type: 'application/json' }});
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'drawing_' + new Date().getTime() + '.json';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        
+        // 存储到 sessionStorage
+        try {{
+            sessionStorage.setItem('drawing_data', dataStr);
+            
+            if (AUTO_UPLOAD) {{
+                updateUploadStatus('✅ 已保存，正在上传...');
+                // 触发 Streamlit 重新加载以处理数据
+                setTimeout(() => {{
+                    updateUploadStatus('✅ 已保存并上传！', false);
+                }}, 1000);
+            }} else {{
+                updateUploadStatus('✅ 已保存！', false);
+            }}
+        }} catch(e) {{
+            console.error('存储失败:', e);
+            updateUploadStatus('⚠️ 已下载，但自动上传失败', true);
+        }}
+        
+    }} catch(err) {{
+        console.error('保存失败:', err);
+        updateUploadStatus('❌ 保存失败！', true);
+    }} finally {{
+        // 恢复保存按钮
+        saveBtn.disabled = false;
+        saveBtn.textContent = '💾 保存';
     }}
 }}
 
 // 初始化统计
 updateStats();
+
+// 监听 sessionStorage 变化（用于跨窗口同步）
+window.addEventListener('storage', function(e) {{
+    if (e.key === 'drawing_data' && e.newValue) {{
+        updateUploadStatus('✅ 数据已同步！', false);
+    }}
+}});
 </script>
 </body>
 </html>

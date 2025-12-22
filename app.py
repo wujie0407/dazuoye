@@ -1,11 +1,13 @@
 """
-手绘画板 Streamlit 应用
+手绘画板 Streamlit 应用 - 优化版
+自动从 secrets 读取配置，绘制完成后自动上传
 """
 
 import streamlit as st
 import streamlit.components.v1 as components
 import json
 from datetime import datetime
+import time
 
 from canvas import CanvasComponent
 from jsonbin import JSONBinService
@@ -18,12 +20,27 @@ st.set_page_config(
     layout="wide"
 )
 
+# 从 secrets 加载配置
+try:
+    API_KEY = st.secrets["JSONBIN_API_KEY"]
+    BIN_ID = st.secrets.get("JSONBIN_BIN_ID", "")
+except Exception as e:
+    st.error(f"❌ 无法加载配置: {str(e)}")
+    st.info("请确保 secrets.toml 文件包含 JSONBIN_API_KEY")
+    st.stop()
+
 # 初始化 session state
 if 'drawing_data' not in st.session_state:
     st.session_state.drawing_data = None
+if 'last_upload_time' not in st.session_state:
+    st.session_state.last_upload_time = None
+if 'current_bin_id' not in st.session_state:
+    st.session_state.current_bin_id = BIN_ID
+if 'auto_upload' not in st.session_state:
+    st.session_state.auto_upload = True
 
 # 标题
-st.title("🎨 手绘画板 - 云端存储")
+st.title("🎨 手绘画板 - 自动云端存储")
 
 # 侧边栏配置
 with st.sidebar:
@@ -41,52 +58,58 @@ with st.sidebar:
     
     st.divider()
     
-    # JSONBin 配置
-    st.header("☁️ JSONBin 配置")
-    api_key = st.text_input(
-        "API Key",
-        value=st.secrets.get("JSONBIN_API_KEY", ""),
-        type="password",
-        help="从 jsonbin.io 获取你的 API Key"
+    # 自动上传设置
+    st.header("☁️ 自动上传")
+    st.session_state.auto_upload = st.checkbox(
+        "启用自动上传",
+        value=st.session_state.auto_upload,
+        help="绘制完成后自动上传到 JSONBin"
     )
     
-    bin_id = st.text_input(
-        "Bin ID (可选)",
-        value=st.secrets.get("JSONBIN_BIN_ID", ""),
-        help="留空则创建新 Bin，填写则更新已有 Bin"
-    )
+    if st.session_state.auto_upload:
+        st.success("✅ 自动上传已启用")
+    else:
+        st.info("ℹ️ 自动上传已禁用")
     
-    # 验证 API Key
-    if api_key:
-        if JSONBinService.validate_api_key(api_key):
-            st.success("✅ API Key 有效")
-        else:
-            st.warning("⚠️ API Key 可能无效")
+    st.divider()
+    
+    # 当前 Bin ID
+    st.subheader("📦 当前 Bin")
+    if st.session_state.current_bin_id:
+        st.code(st.session_state.current_bin_id, language="text")
+    else:
+        st.info("尚未创建 Bin")
+    
+    # 最后上传时间
+    if st.session_state.last_upload_time:
+        st.caption(f"上次上传: {st.session_state.last_upload_time}")
 
 # 主内容区域
 col_main, col_side = st.columns([2, 1])
 
-# 在 app.py 中，修改绘图区域部分
 with col_main:
     st.subheader("🖌️ 绘图区域")
     
-    canvas_html = CanvasComponent.generate_html(
+    # 生成带自动上传功能的画布
+    canvas_html = CanvasComponent.generate_html_with_auto_upload(
         width=canvas_width,
         height=canvas_height,
         pen_color=pen_color,
         pen_width=pen_width,
-        bg_color=bg_color
+        bg_color=bg_color,
+        auto_upload=st.session_state.auto_upload
     )
     
-    components.html(canvas_html, height=canvas_height + 200)
+    components.html(canvas_html, height=canvas_height + 100)
     
-    # 数据上传区域（用于接收从画布保存后下载的 JSON 文件）
-    st.info("💡 在画布上绘制完成后，点击画布中的'保存并上传'按钮，会自动下载 JSON 文件。然后在此上传该文件。")
+    st.info("💡 在画布上绘制完成后，数据会自动保存到右侧面板")
+    
+    # 数据接收区域（隐藏的）
     uploaded_json = st.file_uploader(
-        "📤 上传保存的 JSON 文件",
+        "📤 或手动上传 JSON 文件",
         type=['json'],
         key="json_uploader",
-        help="从画布保存后下载的 JSON 文件"
+        help="如果自动保存失败，可以手动上传"
     )
     
     if uploaded_json is not None:
@@ -94,11 +117,15 @@ with col_main:
             data = json.load(uploaded_json)
             if isinstance(data, dict) and 'image' in data:
                 st.session_state.drawing_data = data
-                st.success("✅ 数据已加载！可以查看右侧预览或上传到 JSONBin。")
+                
+                # 如果启用自动上传，立即上传
+                if st.session_state.auto_upload:
+                    with st.spinner("正在自动上传..."):
+                        upload_to_jsonbin(data)
+                else:
+                    st.success("✅ 数据已加载！")
             else:
-                st.error("❌ JSON 文件格式不正确，缺少必要字段")
-        except json.JSONDecodeError as e:
-            st.error(f"❌ JSON 文件解析失败: {str(e)}")
+                st.error("❌ JSON 文件格式不正确")
         except Exception as e:
             st.error(f"❌ 读取文件失败: {str(e)}")
 
@@ -106,13 +133,13 @@ with col_side:
     st.subheader("📊 数据信息")
     
     if st.session_state.drawing_data:
-        data = st.session_state.drawing_data if isinstance(st.session_state.drawing_data, dict) else None
-
-        if data:
+        data = st.session_state.drawing_data
+        
+        if isinstance(data, dict):
             stats = data.get('statistics', {})
             st.metric("笔画数", stats.get('pathCount', 0))
             st.metric("总点数", stats.get('totalPoints', 0))
-
+            
             duration = stats.get('drawingDuration', 0)
             st.metric("绘制时长", f"{duration / 1000:.1f} 秒")
             
@@ -124,21 +151,50 @@ with col_side:
                 if 'image' in data:
                     image = ImageHandler.base64_to_image(data['image'])
                     st.image(image, use_container_width=True)
-                    
-                    # 显示图像信息
-                    with st.expander("图像详情"):
-                        info = ImageHandler.get_image_info(image)
-                        st.json(info)
             except Exception as e:
                 st.error(f"图像加载失败: {str(e)}")
+
+# 自动上传函数
+def upload_to_jsonbin(data):
+    """自动上传到 JSONBin"""
+    try:
+        service = JSONBinService(API_KEY)
+        
+        if st.session_state.current_bin_id:
+            # 更新已有 Bin
+            try:
+                result = service.update_bin(st.session_state.current_bin_id, data)
+                st.success(f"✅ 已更新到 Bin: {st.session_state.current_bin_id}")
+                st.session_state.last_upload_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            except Exception as update_error:
+                # 如果 404，创建新的
+                if "404" in str(update_error):
+                    result = service.create_bin(data)
+                    new_bin_id = result['metadata']['id']
+                    st.session_state.current_bin_id = new_bin_id
+                    st.success(f"✅ 已创建新 Bin: {new_bin_id}")
+                    st.session_state.last_upload_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                else:
+                    raise
+        else:
+            # 创建新 Bin
+            result = service.create_bin(data)
+            new_bin_id = result['metadata']['id']
+            st.session_state.current_bin_id = new_bin_id
+            st.success(f"✅ 已创建新 Bin: {new_bin_id}")
+            st.info("💡 Bin ID 已保存，下次会自动更新到同一个 Bin")
+            st.session_state.last_upload_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            
+    except Exception as e:
+        st.error(f"❌ 上传失败: {str(e)}")
 
 # 底部操作区
 st.divider()
 
 if st.session_state.drawing_data:
-    data = st.session_state.drawing_data if isinstance(st.session_state.drawing_data, dict) else None
+    data = st.session_state.drawing_data
     
-    if data:
+    if isinstance(data, dict):
         col1, col2, col3 = st.columns(3)
         
         # 下载选项
@@ -169,109 +225,56 @@ if st.session_state.drawing_data:
                 except Exception as e:
                     st.error(f"图像处理失败: {str(e)}")
         
-        # JSONBin 上传
+        # 手动上传
         with col2:
-            st.subheader("☁️ 云端上传")
+            st.subheader("☁️ 手动上传")
             
-            # 显示当前数据状态
-            if data:
-                data_size = len(json.dumps(data))
-                st.caption(f"数据大小: {data_size:,} 字符")
-            
-            if st.button("🚀 上传到 JSONBin", type="primary", use_container_width=True):
-                if not api_key:
-                    st.error("❌ 请先配置 API Key")
-                else:
-                    # 确保从 session_state 获取最新数据
-                    upload_data = st.session_state.drawing_data if isinstance(st.session_state.drawing_data, dict) else None
-                    
-                    if not upload_data:
-                        st.error("❌ 没有可上传的数据")
-                        st.info("💡 请先上传 JSON 文件（在绘图区域下方）")
-                    else:
-                        try:
-                            with st.spinner("上传中..."):
-                                service = JSONBinService(api_key)
-                                
-                                # 检查数据大小
-                                data_str = json.dumps(upload_data)
-                                if len(data_str) > 1000000:  # 1MB
-                                    st.warning("⚠️ 数据较大，上传可能需要一些时间...")
-                                
-                                
-                                if bin_id:
-                                    # 尝试更新已有 Bin
-                                    st.write(f"正在更新 Bin: {bin_id}...")
-                                    try:
-                                        result = service.update_bin(bin_id, upload_data)
-                                        st.success(f"✅ 已更新 Bin: {bin_id}")
-                                    except Exception as update_error:
-                                        # 如果是 404 错误，自动切换为创建模式
-                                        if "404" in str(update_error):
-                                            st.warning(f"⚠️ Bin {bin_id} 不存在，自动创建新 Bin...")
-                                            result = service.create_bin(upload_data)
-                                            new_bin_id = result['metadata']['id']
-                                            st.success(f"✅ 已创建新 Bin")
-                                            st.code(f"新 Bin ID: {new_bin_id}")
-                                            st.info("💡 请更新你的 secrets.toml，使用新的 Bin ID")
-                                        else:
-                                            # 其他错误则继续抛出
-                                            raise
-                                else:
-                                    # 创建新 Bin
-                                    st.write("正在创建新 Bin...")
-                                    result = service.create_bin(upload_data)
-                                    new_bin_id = result['metadata']['id']
-                                    st.success(f"✅ 已创建新 Bin")
-                                    st.code(f"Bin ID: {new_bin_id}")
-                                    st.info("💡 保存此 Bin ID 以便后续更新")
-                                
-                                with st.expander("查看响应"):
-                                    st.json(result)
-                        
-                        except Exception as e:
-                            st.error(f"❌ 上传失败: {str(e)}")
-                            import traceback
-                            with st.expander("查看详细错误信息"):
-                                st.code(traceback.format_exc())
+            if st.button("🚀 立即上传到 JSONBin", type="primary", use_container_width=True):
+                with st.spinner("上传中..."):
+                    upload_to_jsonbin(data)
+        
         # 数据查看
         with col3:
             st.subheader("🔍 数据查看")
             
             if st.button("📖 查看完整数据", use_container_width=True):
-                st.json(st.session_state.drawing_data)
+                with st.expander("完整 JSON 数据", expanded=True):
+                    st.json(data)
 
 else:
-    st.info("👆 请在画布上绘制，然后点击'保存并上传'按钮")
+    st.info("👆 请在画布上绘制，数据会自动显示在右侧")
 
 # 使用说明
 with st.expander("📖 使用指南"):
     st.markdown("""
-    ### 快速开始
+    ### 🚀 快速开始（全自动）
     
-    1. **调整设置**：在左侧边栏配置画笔和画布
-    2. **开始绘画**：在画布上自由创作
-    3. **保存作品**：点击画布中的"💾 保存并上传"按钮（会自动下载 JSON 文件）
-    4. **上传数据**：在绘图区域下方的"📤 上传保存的 JSON 文件"处上传刚下载的 JSON 文件
-    5. **查看和操作**：
-       - 右侧面板会显示绘图统计和预览
-       - 底部可以下载 JSON/图像文件
-       - 可以上传到 JSONBin 云端保存
+    1. **开始绘画**：在画布上自由创作
+    2. **点击"保存"**：点击画布下方的"💾 保存"按钮
+    3. **自动上传**：系统会自动将作品上传到云端
+    4. **实时预览**：右侧面板实时显示统计和预览
     
-    ### JSONBin 设置
+    ### ⚙️ 功能说明
     
-    1. 访问 [jsonbin.io](https://jsonbin.io) 注册账号
-    2. 获取 API Key 并填入侧边栏
-    3. 首次上传会创建新 Bin，记住 Bin ID
-    4. 后续可使用 Bin ID 更新同一个存储空间
+    - **自动上传**：默认启用，可在左侧边栏关闭
+    - **智能 Bin 管理**：
+      - 第一次上传会创建新 Bin
+      - 后续上传会自动更新到同一个 Bin
+      - Bin ID 会自动保存
+    - **手动上传**：关闭自动上传后，可使用底部"立即上传"按钮
+    - **本地保存**：随时可以下载 JSON 或图像文件
     
-    ### 数据格式
-```json
-    {
-        "image": "base64图像数据",
-        "paths": [路径点数组],
-        "statistics": {统计信息},
-        "metadata": {元数据}
-    }
-```
+    ### 📝 配置说明
+    
+    API Key 和 Bin ID 从 `secrets.toml` 自动读取：
+    ```toml
+    JSONBIN_API_KEY = "你的Master_Key"
+    JSONBIN_BIN_ID = ""  # 留空让系统自动创建
+    ```
+    
+    ### 💡 提示
+    
+    - 绘制时可以随时撤销和清空
+    - 支持鼠标和触摸屏绘制
+    - 自动保存的 Bin ID 会显示在左侧边栏
     """)
