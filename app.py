@@ -198,11 +198,25 @@ if st.session_state.drawing_data:
                                 if len(data_str) > 1000000:  # 1MB
                                     st.warning("⚠️ 数据较大，上传可能需要一些时间...")
                                 
+                                
                                 if bin_id:
-                                    # 更新已有 Bin
+                                    # 尝试更新已有 Bin
                                     st.write(f"正在更新 Bin: {bin_id}...")
-                                    result = service.update_bin(bin_id, upload_data)
-                                    st.success(f"✅ 已更新 Bin: {bin_id}")
+                                    try:
+                                        result = service.update_bin(bin_id, upload_data)
+                                        st.success(f"✅ 已更新 Bin: {bin_id}")
+                                    except Exception as update_error:
+                                        # 如果是 404 错误，自动切换为创建模式
+                                        if "404" in str(update_error):
+                                            st.warning(f"⚠️ Bin {bin_id} 不存在，自动创建新 Bin...")
+                                            result = service.create_bin(upload_data)
+                                            new_bin_id = result['metadata']['id']
+                                            st.success(f"✅ 已创建新 Bin")
+                                            st.code(f"新 Bin ID: {new_bin_id}")
+                                            st.info("💡 请更新你的 secrets.toml，使用新的 Bin ID")
+                                        else:
+                                            # 其他错误则继续抛出
+                                            raise
                                 else:
                                     # 创建新 Bin
                                     st.write("正在创建新 Bin...")
@@ -220,7 +234,6 @@ if st.session_state.drawing_data:
                             import traceback
                             with st.expander("查看详细错误信息"):
                                 st.code(traceback.format_exc())
-        
         # 数据查看
         with col3:
             st.subheader("🔍 数据查看")
