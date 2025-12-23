@@ -19,7 +19,7 @@ st.set_page_config(
 )
 
 # API 配置
-API_KEY = "$2a$10$pleOacf0lQu1mvIU//jjfeYPUCb.kiFXX.08qupD/90UYKwHtU8e."  # 替换为你的 Master Key
+API_KEY = "$2a$10$pleOacf0lQu1mvIU//jjfeYPUCb.kiFXX.08qupD/90UYKwHtU8e."
 BIN_ID = ""
 
 # 初始化 session state
@@ -333,11 +333,17 @@ with col1:
                 timestamp: new Date().toISOString()
             }};
             
-            // 发送给 Streamlit
-            window.parent.postMessage({{
-                type: 'streamlit:setComponentValue',
-                value: data
-            }}, '*');
+            // 下载为 JSON 文件
+            const dataStr = JSON.stringify(data, null, 2);
+            const blob = new Blob([dataStr], {{ type: 'application/json' }});
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'drawing_' + new Date().getTime() + '.json';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
             
             btn.textContent = '✅ 已保存';
             btn.style.background = '#43e97b';
@@ -361,12 +367,28 @@ with col1:
     </html>
     """
     
-    canvas_data = components.html(canvas_html, height=canvas_height + 120, key="canvas")
+    # 显示画布
+    components.html(canvas_html, height=canvas_height + 120)
     
-    # 接收画布数据
-    if canvas_data:
-        st.session_state.drawing_data = canvas_data
-        st.success("✅ 图形已保存到内存")
+    # 使用文件上传接收数据
+    st.divider()
+    uploaded_json = st.file_uploader(
+        "📤 上传绘图数据",
+        type=['json'],
+        key='drawing_uploader',
+        help="点击画布的'保存图形'按钮后，会自动下载 JSON 文件，把文件拖到这里"
+    )
+    
+    if uploaded_json:
+        try:
+            data = json.load(uploaded_json)
+            if 'image' in data or 'paths' in data:
+                st.session_state.drawing_data = data
+                st.success("✅ 图形已保存到内存")
+            else:
+                st.error("文件格式不正确")
+        except Exception as e:
+            st.error(f"读取失败: {str(e)}")
 
 with col2:
     st.subheader("📋 设计预览")
