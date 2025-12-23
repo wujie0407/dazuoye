@@ -1,5 +1,6 @@
 """
-手绘画板 Streamlit 应用 - 简化版（内置配置）
+手绘画板 + 材料选择系统
+画图 + 选材料 + 一键上传
 """
 
 import streamlit as st
@@ -7,257 +8,473 @@ import streamlit.components.v1 as components
 import json
 from datetime import datetime
 
-from canvas import CanvasComponent
 from jsonbin import JSONBinService
 from image_handler import ImageHandler
 
 # 页面配置
 st.set_page_config(
-    page_title="手绘画板",
-    page_icon="🎨",
+    page_title="风筝设计系统",
+    page_icon="🪁",
     layout="wide"
 )
 
-# ==========================================
-# 直接设置 API Key（临时方案）
-# ==========================================
-API_KEY = "$2a$10$pleOacf0lQu1mvIU//jjfeYPUCb.kiFXX.08qupD/90UYKwHtU8e."
+# API 配置
+API_KEY = "$2a$10$pleOacf0lQu1mvIU//jjfeYPUCb.kiFXX.08qupD/90UYKwHtU8e."  # 替换为你的 Master Key
 BIN_ID = ""
 
 # 初始化 session state
-if 'drawing_data' not in st.session_state:
-    st.session_state.drawing_data = None
-if 'last_upload_time' not in st.session_state:
-    st.session_state.last_upload_time = None
 if 'current_bin_id' not in st.session_state:
     st.session_state.current_bin_id = BIN_ID
-if 'auto_upload' not in st.session_state:
-    st.session_state.auto_upload = True
+if 'last_upload_time' not in st.session_state:
+    st.session_state.last_upload_time = None
+if 'drawing_data' not in st.session_state:
+    st.session_state.drawing_data = None
+if 'material_selections' not in st.session_state:
+    st.session_state.material_selections = {
+        '骨架材料': [],
+        '风筝面料': [],
+        '绳索材料': []
+    }
+
+# 材料数据库
+MATERIALS = {
+    '骨架材料': [
+        '竹子',
+        '铝合金',
+        '碳纤维'
+    ],
+    '风筝面料': [
+        '丝绸',
+        '尼龙',
+        'Mylar膜'
+    ],
+    '绳索材料': [
+        '麻绳',
+        '钢索',
+        '凯夫拉'
+    ]
+}
 
 # 标题
-st.title("🎨 手绘画板 - 自动云端存储")
+st.title("🪁 风筝设计系统")
+st.caption("设计图形 + 选择材料 + 一键上传")
 
-# 定义上传函数
-def upload_to_jsonbin(data):
-    """自动上传到 JSONBin"""
+# 上传函数
+def upload_complete_design(drawing_data, materials):
+    """上传完整设计（图形+材料）"""
     try:
+        # 合并数据
+        complete_data = {
+            'drawing': drawing_data,
+            'materials': materials,
+            'metadata': {
+                'created_at': datetime.now().isoformat(),
+                'design_type': '风筝设计'
+            }
+        }
+        
         service = JSONBinService(API_KEY)
         
         if st.session_state.current_bin_id:
-            # 更新已有 Bin
             try:
-                result = service.update_bin(st.session_state.current_bin_id, data)
-                st.success(f"✅ 已更新到 Bin: {st.session_state.current_bin_id}")
-                st.session_state.last_upload_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            except Exception as update_error:
-                # 如果 404，创建新的
-                if "404" in str(update_error):
-                    result = service.create_bin(data)
-                    new_bin_id = result['metadata']['id']
-                    st.session_state.current_bin_id = new_bin_id
-                    st.success(f"✅ 已创建新 Bin: {new_bin_id}")
-                    st.session_state.last_upload_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                else:
-                    raise
+                result = service.update_bin(st.session_state.current_bin_id, complete_data)
+                st.success(f"✅ 设计已更新！")
+                st.session_state.last_upload_time = datetime.now().strftime("%H:%M:%S")
+                return True
+            except Exception as e:
+                if "404" in str(e):
+                    result = service.create_bin(complete_data)
+                    st.session_state.current_bin_id = result['metadata']['id']
+                    st.success(f"✅ 设计已保存！Bin ID: {st.session_state.current_bin_id[:20]}...")
+                    st.session_state.last_upload_time = datetime.now().strftime("%H:%M:%S")
+                    return True
+                raise
         else:
-            # 创建新 Bin
-            result = service.create_bin(data)
-            new_bin_id = result['metadata']['id']
-            st.session_state.current_bin_id = new_bin_id
-            st.success(f"✅ 已创建新 Bin: {new_bin_id}")
-            st.info("💡 Bin ID 已保存，下次会自动更新到同一个 Bin")
-            st.session_state.last_upload_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            result = service.create_bin(complete_data)
+            st.session_state.current_bin_id = result['metadata']['id']
+            st.success(f"✅ 设计已保存！Bin ID: {st.session_state.current_bin_id[:20]}...")
+            st.session_state.last_upload_time = datetime.now().strftime("%H:%M:%S")
+            return True
             
     except Exception as e:
         st.error(f"❌ 上传失败: {str(e)}")
-        import traceback
-        with st.expander("查看详细错误"):
-            st.code(traceback.format_exc())
+        return False
 
-# 侧边栏配置
+# 侧边栏 - 材料选择
 with st.sidebar:
-    st.header("⚙️ 画布配置")
+    st.header("📦 材料选择")
+    
+    for category, options in MATERIALS.items():
+        st.subheader(f"• {category}")
+        
+        # 使用多选框
+        selected = st.multiselect(
+            f"选择{category}",
+            options=options,
+            default=st.session_state.material_selections[category],
+            key=f"material_{category}"
+        )
+        
+        st.session_state.material_selections[category] = selected
+        
+        # 显示已选材料
+        if selected:
+            st.success(f"已选: {', '.join(selected)}")
+        else:
+            st.info("未选择")
+        
+        st.divider()
+    
+    # 上传记录
+    st.subheader("☁️ 上传记录")
+    if st.session_state.current_bin_id:
+        st.code(st.session_state.current_bin_id[:25] + "...", language="text")
+        if st.session_state.last_upload_time:
+            st.caption(f"最后上传: {st.session_state.last_upload_time}")
+    else:
+        st.info("还未上传")
+
+# 主界面 - 三列布局
+col1, col2 = st.columns([2, 1])
+
+with col1:
+    st.subheader("🖌️ 设计绘图区")
     
     # 画笔设置
-    pen_width = st.slider("笔触粗细", 1, 20, 3)
-    pen_color = st.color_picker("笔触颜色", "#000000")
-    bg_color = st.color_picker("背景颜色", "#FFFFFF")
+    pen_col1, pen_col2, pen_col3 = st.columns(3)
+    with pen_col1:
+        pen_width = st.slider("笔触粗细", 1, 20, 3)
+    with pen_col2:
+        pen_color = st.color_picker("笔触颜色", "#000000")
+    with pen_col3:
+        bg_color = st.color_picker("背景颜色", "#FFFFFF")
     
-    # 画布尺寸
-    st.subheader("画布尺寸")
-    canvas_width = st.number_input("宽度", 400, 1200, 800, step=50)
-    canvas_height = st.number_input("高度", 300, 800, 600, step=50)
+    # 画布
+    canvas_width = 700
+    canvas_height = 500
     
-    st.divider()
+    canvas_html = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+    <style>
+        * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+        body {{ 
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 15px;
+            font-family: 'Segoe UI', sans-serif;
+        }}
+        .container {{
+            background: white;
+            border-radius: 12px;
+            padding: 15px;
+            box-shadow: 0 8px 25px rgba(0,0,0,0.15);
+        }}
+        #canvas {{
+            border: 2px solid #ddd;
+            cursor: crosshair;
+            background: {bg_color};
+            border-radius: 6px;
+            display: block;
+            margin: 0 auto;
+        }}
+        .controls {{
+            margin-top: 15px;
+            text-align: center;
+            display: flex;
+            justify-content: center;
+            gap: 8px;
+            flex-wrap: wrap;
+        }}
+        button {{
+            padding: 10px 20px;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+        }}
+        button:hover {{ transform: translateY(-1px); }}
+        #undoBtn {{ background: #4facfe; color: white; }}
+        #clearBtn {{ background: #f5576c; color: white; }}
+        #saveBtn {{ background: #43e97b; color: white; }}
+        .info {{
+            margin-top: 10px;
+            text-align: center;
+            color: #666;
+            font-size: 13px;
+        }}
+    </style>
+    </head>
+    <body>
+    <div class="container">
+        <canvas id="canvas" width="{canvas_width}" height="{canvas_height}"></canvas>
+        <div class="controls">
+            <button id="undoBtn" onclick="undo()">↶ 撤销</button>
+            <button id="clearBtn" onclick="clear()">🗑️ 清空</button>
+            <button id="saveBtn" onclick="saveDrawing()">💾 保存图形</button>
+        </div>
+        <div class="info">
+            <span id="stats">笔画: 0 | 点数: 0</span>
+        </div>
+    </div>
     
-    # 自动上传设置
-    st.header("☁️ 自动上传")
-    st.session_state.auto_upload = st.checkbox(
-        "启用自动上传",
-        value=st.session_state.auto_upload,
-        help="绘制完成后自动上传到 JSONBin"
-    )
+    <script>
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    let drawing = false, paths = [], currentPath = [], totalPoints = 0;
     
-    if st.session_state.auto_upload:
-        st.success("✅ 自动上传已启用")
-    else:
-        st.info("ℹ️ 自动上传已禁用")
+    ctx.strokeStyle = '{pen_color}';
+    ctx.lineWidth = {pen_width};
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
     
-    st.divider()
+    function getPos(e) {{
+        const rect = canvas.getBoundingClientRect();
+        return {{
+            x: (e.clientX - rect.left) * (canvas.width / rect.width),
+            y: (e.clientY - rect.top) * (canvas.height / rect.height),
+            timestamp: Date.now()
+        }};
+    }}
     
-    # 当前 Bin ID
-    st.subheader("📦 当前 Bin")
-    if st.session_state.current_bin_id:
-        st.code(st.session_state.current_bin_id, language="text")
-    else:
-        st.info("尚未创建 Bin")
+    canvas.addEventListener('mousedown', e => {{
+        drawing = true;
+        const p = getPos(e);
+        currentPath = [p];
+        ctx.beginPath();
+        ctx.moveTo(p.x, p.y);
+    }});
     
-    # 最后上传时间
-    if st.session_state.last_upload_time:
-        st.caption(f"上次上传: {st.session_state.last_upload_time}")
-
-# 主内容区域
-col_main, col_side = st.columns([2, 1])
-
-with col_main:
-    st.subheader("🖌️ 绘图区域")
+    canvas.addEventListener('mousemove', e => {{
+        if (!drawing) return;
+        const p = getPos(e);
+        currentPath.push(p);
+        ctx.lineTo(p.x, p.y);
+        ctx.stroke();
+        updateStats();
+    }});
     
-    # 生成带自动上传功能的画布
-    canvas_html = CanvasComponent.generate_html_with_auto_upload(
-        width=canvas_width,
-        height=canvas_height,
-        pen_color=pen_color,
-        pen_width=pen_width,
-        bg_color=bg_color,
-        auto_upload=st.session_state.auto_upload
-    )
+    canvas.addEventListener('mouseup', () => stop());
+    canvas.addEventListener('mouseleave', () => stop());
     
-    components.html(canvas_html, height=canvas_height + 100)
+    function stop() {{
+        if (drawing && currentPath.length > 0) {{
+            paths.push([...currentPath]);
+            totalPoints += currentPath.length;
+        }}
+        drawing = false;
+        updateStats();
+    }}
     
-    st.info("💡 在画布上绘制完成后，点击'保存'按钮，数据会自动保存")
+    function updateStats() {{
+        document.getElementById('stats').textContent = `笔画: ${{paths.length}} | 点数: ${{totalPoints}}`;
+    }}
     
-    # 数据接收区域
-    uploaded_json = st.file_uploader(
-        "📤 或手动上传 JSON 文件",
-        type=['json'],
-        key="json_uploader",
-        help="如果自动保存失败，可以手动上传"
-    )
+    function undo() {{
+        if (paths.length > 0) {{
+            totalPoints -= paths.pop().length;
+            redraw();
+        }}
+    }}
     
-    if uploaded_json is not None:
-        try:
-            data = json.load(uploaded_json)
-            if isinstance(data, dict) and 'image' in data:
-                st.session_state.drawing_data = data
-                
-                # 如果启用自动上传，立即上传
-                if st.session_state.auto_upload:
-                    with st.spinner("正在自动上传..."):
-                        upload_to_jsonbin(data)
-                else:
-                    st.success("✅ 数据已加载！")
-            else:
-                st.error("❌ JSON 文件格式不正确")
-        except Exception as e:
-            st.error(f"❌ 读取文件失败: {str(e)}")
-
-with col_side:
-    st.subheader("📊 数据信息")
+    function clear() {{
+        if (confirm('确定清空画布吗？')) {{
+            paths = [];
+            totalPoints = 0;
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            updateStats();
+        }}
+    }}
     
-    if st.session_state.drawing_data:
-        data = st.session_state.drawing_data
+    function redraw() {{
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        paths.forEach(path => {{
+            if (path.length > 0) {{
+                ctx.beginPath();
+                ctx.moveTo(path[0].x, path[0].y);
+                path.forEach(pt => ctx.lineTo(pt.x, pt.y));
+                ctx.stroke();
+            }}
+        }});
+        updateStats();
+    }}
+    
+    function saveDrawing() {{
+        if (paths.length === 0) {{
+            alert('画布为空！请先绘制内容');
+            return;
+        }}
         
-        if isinstance(data, dict):
-            stats = data.get('statistics', {})
-            st.metric("笔画数", stats.get('pathCount', 0))
-            st.metric("总点数", stats.get('totalPoints', 0))
+        const btn = document.getElementById('saveBtn');
+        btn.disabled = true;
+        btn.textContent = '保存中...';
+        
+        try {{
+            const timestamps = paths.flat().map(p => p.timestamp);
+            const duration = timestamps.length > 0 ? Math.max(...timestamps) - Math.min(...timestamps) : 0;
             
-            duration = stats.get('drawingDuration', 0)
-            st.metric("绘制时长", f"{duration / 1000:.1f} 秒")
+            const data = {{
+                image: canvas.toDataURL('image/png'),
+                paths: paths,
+                statistics: {{
+                    pathCount: paths.length,
+                    totalPoints: totalPoints,
+                    drawingDuration: duration
+                }},
+                canvas_settings: {{
+                    width: canvas.width,
+                    height: canvas.height,
+                    penColor: '{pen_color}',
+                    penWidth: {pen_width},
+                    backgroundColor: '{bg_color}'
+                }},
+                timestamp: new Date().toISOString()
+            }};
             
-            st.divider()
+            // 发送给 Streamlit
+            window.parent.postMessage({{
+                type: 'streamlit:setComponentValue',
+                value: data
+            }}, '*');
             
-            # 图像预览
-            st.subheader("🖼️ 预览")
-            try:
-                if 'image' in data:
-                    image = ImageHandler.base64_to_image(data['image'])
-                    st.image(image, use_container_width=True)
-            except Exception as e:
-                st.error(f"图像加载失败: {str(e)}")
+            btn.textContent = '✅ 已保存';
+            btn.style.background = '#43e97b';
+            
+            setTimeout(() => {{
+                btn.disabled = false;
+                btn.textContent = '💾 保存图形';
+                btn.style.background = '#43e97b';
+            }}, 1500);
+            
+        }} catch (err) {{
+            alert('保存失败: ' + err.message);
+            btn.disabled = false;
+            btn.textContent = '💾 保存图形';
+        }}
+    }}
+    
+    updateStats();
+    </script>
+    </body>
+    </html>
+    """
+    
+    canvas_data = components.html(canvas_html, height=canvas_height + 120, key="canvas")
+    
+    # 接收画布数据
+    if canvas_data:
+        st.session_state.drawing_data = canvas_data
+        st.success("✅ 图形已保存到内存")
 
-# 底部操作区
+with col2:
+    st.subheader("📋 设计预览")
+    
+    # 材料选择预览
+    with st.expander("📦 已选材料", expanded=True):
+        has_materials = False
+        for category, selected in st.session_state.material_selections.items():
+            if selected:
+                has_materials = True
+                st.write(f"**{category}:**")
+                for item in selected:
+                    st.write(f"  • {item}")
+        
+        if not has_materials:
+            st.info("还未选择材料")
+    
+    # 图形预览
+    if st.session_state.drawing_data:
+        st.divider()
+        st.write("**绘图预览:**")
+        try:
+            if 'image' in st.session_state.drawing_data:
+                image = ImageHandler.base64_to_image(st.session_state.drawing_data['image'])
+                st.image(image, use_container_width=True)
+                
+                stats = st.session_state.drawing_data.get('statistics', {})
+                col_a, col_b = st.columns(2)
+                with col_a:
+                    st.metric("笔画数", stats.get('pathCount', 0))
+                with col_b:
+                    st.metric("总点数", stats.get('totalPoints', 0))
+        except:
+            st.error("图像加载失败")
+    else:
+        st.divider()
+        st.info("👈 先在左侧绘制图形")
+
+# 底部上传区
 st.divider()
 
-if st.session_state.drawing_data:
-    data = st.session_state.drawing_data
-    
-    if isinstance(data, dict):
-        col1, col2, col3 = st.columns(3)
-        
-        # 下载选项
-        with col1:
-            st.subheader("💾 本地保存")
-            
-            json_str = json.dumps(data, indent=2, ensure_ascii=False)
-            st.download_button(
-                label="📥 下载 JSON",
-                data=json_str,
-                file_name=f"drawing_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
-                mime="application/json",
-                use_container_width=True
-            )
-            
-            # 下载图像
-            if 'image' in data:
-                try:
-                    image = ImageHandler.base64_to_image(data['image'])
-                    image_bytes = ImageHandler.image_to_bytes(image)
-                    st.download_button(
-                        label="📥 下载图像",
-                        data=image_bytes,
-                        file_name=f"drawing_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png",
-                        mime="image/png",
-                        use_container_width=True
-                    )
-                except Exception as e:
-                    st.error(f"图像处理失败: {str(e)}")
-        
-        # 手动上传
-        with col2:
-            st.subheader("☁️ 手动上传")
-            
-            if st.button("🚀 立即上传到 JSONBin", type="primary", use_container_width=True):
-                with st.spinner("上传中..."):
-                    upload_to_jsonbin(data)
-        
-        # 数据查看
-        with col3:
-            st.subheader("🔍 数据查看")
-            
-            if st.button("📖 查看完整数据", use_container_width=True):
-                with st.expander("完整 JSON 数据", expanded=True):
-                    st.json(data)
+upload_col1, upload_col2, upload_col3 = st.columns([1, 2, 1])
 
-else:
-    st.info("👆 请在画布上绘制，数据会自动显示在右侧")
+with upload_col2:
+    st.subheader("☁️ 上传完整设计")
+    
+    # 检查是否有数据
+    has_drawing = st.session_state.drawing_data is not None
+    has_materials = any(st.session_state.material_selections.values())
+    
+    # 状态指示
+    status_col1, status_col2 = st.columns(2)
+    with status_col1:
+        if has_drawing:
+            st.success("✅ 已绘制图形")
+        else:
+            st.warning("⚠️ 未绘制图形")
+    
+    with status_col2:
+        if has_materials:
+            st.success("✅ 已选择材料")
+        else:
+            st.warning("⚠️ 未选择材料")
+    
+    # 上传按钮
+    if st.button("🚀 上传完整设计", type="primary", use_container_width=True, disabled=not (has_drawing or has_materials)):
+        if not has_drawing and not has_materials:
+            st.error("❌ 请先绘制图形或选择材料")
+        else:
+            with st.spinner("正在上传..."):
+                if upload_complete_design(
+                    st.session_state.drawing_data,
+                    st.session_state.material_selections
+                ):
+                    st.balloons()
+                    st.success("🎉 设计已成功上传到云端！")
 
 # 使用说明
 with st.expander("📖 使用指南"):
     st.markdown("""
-    ### 🚀 使用步骤
+    ### 🎯 完整流程
     
-    1. **开始绘画**：在画布上自由创作
-    2. **点击保存**：点击画布下方的"💾 保存"按钮
-    3. **自动处理**：
-       - JSON 文件会自动下载
-       - 数据会自动上传到云端（如果启用）
-    4. **查看结果**：右侧面板显示统计和预览
+    **第一步：绘制设计图**
+    - 在左侧画布上绘制风筝设计
+    - 可以调整笔触粗细和颜色
+    - 点击"💾 保存图形"按钮
+    
+    **第二步：选择材料**
+    - 在左侧边栏选择各部件的材料
+    - 材料面板：竹子、铝合金、碳纤维等
+    - 骨架材料：轻质、耐热、柔韧等
+    - 风筝面料：丝绸、尼龙、Mylar膜等
+    
+    **第三步：上传设计**
+    - 确认图形和材料都已设置
+    - 点击"🚀 上传完整设计"按钮
+    - 完成！
     
     ### 💡 提示
     
-    - 绘制时可以随时撤销和清空
-    - 支持鼠标和触摸屏绘制
-    - 自动保存的 Bin ID 会显示在左侧边栏
-    - 可以下载 JSON 和图像文件
+    - 可以只绘图不选材料，也可以只选材料不绘图
+    - 支持多选材料
+    - 每次上传会保存完整的设计数据
+    - Bin ID 显示在左侧边栏
+    
+    ### 📦 上传的数据包含
+    
+    - **drawing**: 绘图数据（图像、路径、统计）
+    - **materials**: 材料选择（三类材料）
+    - **metadata**: 元数据（时间戳、设计类型）
     """)
