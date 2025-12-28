@@ -1,6 +1,6 @@
 """
-风筝设计系统 - 真·自动上传版
-画完 → 自动保存 → 选材料 → 一键上传
+风筝设计系统 - 真·自动上传版 + 智能追踪
+画完 → 自动保存 → 选材料 → 一键上传 → 自动保存Bin ID供评分系统使用
 使用 streamlit-drawable-canvas 组件
 """
 
@@ -45,7 +45,16 @@ MATERIALS = {
 }
 
 st.title("🪁 风筝设计系统")
-st.caption("画完自动保存 → 选材料 → 一键上传")
+st.caption("画完自动保存 → 选材料 → 一键上传 → 自动追踪")
+
+# 保存 Bin ID 供评分系统使用
+def save_bin_id_for_scorer(bin_id: str):
+    """保存 Bin ID 到文件，供评分系统读取"""
+    try:
+        with open('latest_bin.txt', 'w') as f:
+            f.write(bin_id)
+    except:
+        pass
 
 # 上传函数
 def upload_complete_design(canvas_data, materials):
@@ -90,19 +99,33 @@ def upload_complete_design(canvas_data, materials):
                 service.update_bin(st.session_state.current_bin_id, complete_data)
                 st.success("✅ 设计已更新！")
                 st.session_state.last_upload_time = datetime.now().strftime("%H:%M:%S")
+                
+                # 保存 Bin ID
+                save_bin_id_for_scorer(st.session_state.current_bin_id)
+                
                 return True
             except Exception as e:
                 if "404" in str(e):
                     result = service.create_bin(complete_data)
                     st.session_state.current_bin_id = result['metadata']['id']
+                    
+                    # 保存 Bin ID
+                    save_bin_id_for_scorer(st.session_state.current_bin_id)
+                    
                     st.success(f"✅ 设计已保存！Bin: {st.session_state.current_bin_id[:20]}...")
+                    st.info("💡 评分系统现在可以自动监控这个 Bin 了！")
                     st.session_state.last_upload_time = datetime.now().strftime("%H:%M:%S")
                     return True
                 raise
         else:
             result = service.create_bin(complete_data)
             st.session_state.current_bin_id = result['metadata']['id']
+            
+            # 保存 Bin ID
+            save_bin_id_for_scorer(st.session_state.current_bin_id)
+            
             st.success(f"✅ 设计已保存！Bin: {st.session_state.current_bin_id[:20]}...")
+            st.info("💡 评分系统现在可以自动监控这个 Bin 了！")
             st.session_state.last_upload_time = datetime.now().strftime("%H:%M:%S")
             return True
     except Exception as e:
@@ -229,6 +252,7 @@ with col_y:
             if upload_complete_design(canvas_result, st.session_state.material_selections):
                 st.balloons()
                 st.success("🎉 设计已成功上传到云端！")
+                st.info("💡 现在可以启动评分系统监控这个设计了")
 
 # 使用说明
 with st.expander("📖 使用指南"):
@@ -248,11 +272,17 @@ with st.expander("📖 使用指南"):
     - 点击"🚀 上传完整设计"按钮
     - 完成！
     
+    **步骤 4：启动评分系统**
+    - 打开新终端
+    - 运行: `python smart_scorer.py`
+    - 评分系统会自动监控这个 Bin
+    
     ### ✨ 特点
     
     - **自动保存**：画完就保存，无需下载文件
     - **实时预览**：右侧即时预览
     - **一键上传**：图形和材料一起上传
+    - **智能追踪**：自动保存 Bin ID 供评分系统使用
     - **手机友好**：完全适配手机操作
     
     ### 🛠️ 绘图工具
