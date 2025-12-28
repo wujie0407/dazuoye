@@ -1,7 +1,6 @@
 """
-风筝设计系统 - 真·自动上传版 + 智能追踪
-画完 → 自动保存 → 选材料 → 一键上传 → 自动保存Bin ID供评分系统使用
-使用 streamlit-drawable-canvas 组件
+风筝设计系统 - 单Bin版
+所有设计都上传到同一个 Bin，自动累加
 """
 
 import streamlit as st
@@ -23,19 +22,31 @@ st.set_page_config(
 
 # API 配置
 API_KEY = "$2a$10$pleOacf0lQu1mvIU//jjfeYPUCb.kiFXX.08qupD/90UYKwHtU8e."
-BIN_ID = ""
+
+# 固定的 Bin ID（第一次会自动创建）
+FIXED_BIN_FILE = "fixed_bin_id.txt"
 
 # 初始化
-if 'current_bin_id' not in st.session_state:
-    st.session_state.current_bin_id = BIN_ID
+if 'fixed_bin_id' not in st.session_state:
+    # 尝试从文件读取
+    try:
+        with open(FIXED_BIN_FILE, 'r') as f:
+            st.session_state.fixed_bin_id = f.read().strip()
+    except:
+        st.session_state.fixed_bin_id = None
+
 if 'last_upload_time' not in st.session_state:
     st.session_state.last_upload_time = None
+
 if 'material_selections' not in st.session_state:
     st.session_state.material_selections = {
         '骨架材料': [],
         '风筝面料': [],
         '绳索材料': []
     }
+
+if 'design_count' not in st.session_state:
+    st.session_state.design_count = 0
 
 # 材料数据库
 MATERIALS = {
@@ -44,27 +55,41 @@ MATERIALS = {
     '绳索材料': ['麻绳', '钢索', '凯夫拉']
 }
 
-st.title("🪁 风筝设计系统")
-st.caption("画完自动保存 → 选材料 → 一键上传 → 自动追踪")
+st.title("🪁 风筝设计系统 - 单Bin版")
+st.caption("所有设计都保存在同一个 Bin 中，自动累加")
 
-# 保存 Bin ID 供评分系统使用
-def save_bin_id_for_scorer(bin_id: str):
-    """保存 Bin ID 到文件，供评分系统读取"""
+
+def save_fixed_bin_id(bin_id: str):
+    """保存固定的 Bin ID"""
     try:
+        with open(FIXED_BIN_FILE, 'w') as f:
+            f.write(bin_id)
+        # 同时保存到 latest_bin.txt 供评分系统使用
         with open('latest_bin.txt', 'w') as f:
             f.write(bin_id)
-    except:
-        pass
+    except Exception as e:
+        st.warning(f"保存 Bin ID 失败: {str(e)}")
 
-# 上传函数
-def upload_complete_design(canvas_data, materials):
+
+def get_existing_designs(service: JSONBinService, bin_id: str) -> list:
+    """获取已有的设计列表"""
     try:
+        response = service.read_bin(bin_id)
+        data = response.get('record', response)
+        return data.get('designs', [])
+    except Exception as e:
+        print(f"读取已有设计失败: {str(e)}")
+        return []
+
+
+def upload_design(canvas_data, materials):
+    """上传设计到固定的 Bin"""
+    try:
+        service = JSONBinService(API_KEY)
+        
         # 转换画布数据
         if canvas_data is not None and canvas_data.image_data is not None:
-            # 将 numpy 数组转为 PIL Image
             img = Image.fromarray(canvas_data.image_data.astype('uint8'), 'RGBA')
-            
-            # 转为 base64
             buffered = io.BytesIO()
             img.save(buffered, format="PNG")
             img_str = base64.b64encode(buffered.getvalue()).decode()
@@ -83,57 +108,66 @@ def upload_complete_design(canvas_data, materials):
         else:
             drawing_data = None
         
-        complete_data = {
+        # 创建新设计对象
+        new_design = {
+            'design_id': datetime.now().strftime('%Y%m%d_%H%M%S'),
             'drawing': drawing_data,
             'materials': materials,
-            'metadata': {
-                'created_at': datetime.now().isoformat(),
-                'design_type': '风筝设计'
-            }
+            'created_at': datetime.now().isoformat()
         }
         
-        service = JSONBinService(API_KEY)
-        
-        if st.session_state.current_bin_id:
-            try:
-                service.update_bin(st.session_state.current_bin_id, complete_data)
-                st.success("✅ 设计已更新！")
-                st.session_state.last_upload_time = datetime.now().strftime("%H:%M:%S")
-                
-                # 保存 Bin ID
-                save_bin_id_for_scorer(st.session_state.current_bin_id)
-                
-                return True
-            except Exception as e:
-                if "404" in str(e):
-                    result = service.create_bin(complete_data)
-                    st.session_state.current_bin_id = result['metadata']['id']
-                    
-                    # 保存 Bin ID
-                    save_bin_id_for_scorer(st.session_state.current_bin_id)
-                    
-                    st.success(f"✅ 设计已保存！Bin: {st.session_state.current_bin_id[:20]}...")
-                    st.info("💡 评分系统现在可以自动监控这个 Bin 了！")
-                    st.session_state.last_upload_time = datetime.now().strftime("%H:%M:%S")
-                    return True
-                raise
+        # 如果没有固定 Bin，创建新的
+        if not st.session_state.fixed_bin_id:
+            complete_data = {
+                'designs': [new_design],
+                'metadata': {
+                    'created_at': datetime.now().isoformat(),
+                    'last_updated': datetime.now().isoformat(),
+                    'total_designs': 1
+                }
+            }
+            
+            result = service.create_bin(complete_data, bin_name="kite_designs_collection")
+            st.session_state.fixed_bin_id = result['metadata']['id']
+            save_fixed_bin_id(st.session_state.fixed_bin_id)
+            
+            st.success(f"✅ 首次创建！Bin ID: {st.session_state.fixed_bin_id[:20]}...")
+            st.info("💡 后续所有设计都会保存到这个 Bin")
+            
         else:
-            result = service.create_bin(complete_data)
-            st.session_state.current_bin_id = result['metadata']['id']
+            # 读取已有设计
+            existing_designs = get_existing_designs(service, st.session_state.fixed_bin_id)
             
-            # 保存 Bin ID
-            save_bin_id_for_scorer(st.session_state.current_bin_id)
+            # 添加新设计
+            existing_designs.append(new_design)
             
-            st.success(f"✅ 设计已保存！Bin: {st.session_state.current_bin_id[:20]}...")
-            st.info("💡 评分系统现在可以自动监控这个 Bin 了！")
-            st.session_state.last_upload_time = datetime.now().strftime("%H:%M:%S")
-            return True
+            # 更新完整数据
+            complete_data = {
+                'designs': existing_designs,
+                'metadata': {
+                    'created_at': existing_designs[0]['created_at'] if existing_designs else datetime.now().isoformat(),
+                    'last_updated': datetime.now().isoformat(),
+                    'total_designs': len(existing_designs)
+                }
+            }
+            
+            # 更新 Bin
+            service.update_bin(st.session_state.fixed_bin_id, complete_data)
+            
+            st.success(f"✅ 设计已添加！当前共 {len(existing_designs)} 个设计")
+        
+        st.session_state.last_upload_time = datetime.now().strftime("%H:%M:%S")
+        st.session_state.design_count = len(get_existing_designs(service, st.session_state.fixed_bin_id))
+        
+        return True
+        
     except Exception as e:
         st.error(f"❌ 上传失败: {str(e)}")
         import traceback
         with st.expander("查看详细错误"):
             st.code(traceback.format_exc())
         return False
+
 
 # 侧边栏
 with st.sidebar:
@@ -155,13 +189,27 @@ with st.sidebar:
             st.info("未选择")
         st.divider()
     
-    st.subheader("☁️ 上传记录")
-    if st.session_state.current_bin_id:
-        st.code(st.session_state.current_bin_id[:25] + "...")
+    st.subheader("☁️ Bin 信息")
+    if st.session_state.fixed_bin_id:
+        st.code(st.session_state.fixed_bin_id[:25] + "...")
+        st.metric("设计数量", st.session_state.design_count)
         if st.session_state.last_upload_time:
-            st.caption(f"最后: {st.session_state.last_upload_time}")
+            st.caption(f"最后上传: {st.session_state.last_upload_time}")
     else:
-        st.info("还未上传")
+        st.info("还未创建 Bin")
+    
+    # 重置按钮
+    st.divider()
+    if st.button("🔄 重置 Bin ID", help="创建新的 Bin（慎用！）"):
+        st.session_state.fixed_bin_id = None
+        try:
+            import os
+            os.remove(FIXED_BIN_FILE)
+            os.remove('latest_bin.txt')
+        except:
+            pass
+        st.warning("Bin ID 已重置，下次上传将创建新 Bin")
+        st.rerun()
 
 # 主界面
 col1, col2 = st.columns([2, 1])
@@ -193,7 +241,7 @@ with col1:
         key="canvas",
     )
     
-    st.info("💡 画完后，直接选择材料并点击下方'上传完整设计'按钮")
+    st.info("💡 所有设计都会保存到同一个 Bin 中")
 
 with col2:
     st.subheader("📋 预览")
@@ -228,7 +276,7 @@ st.divider()
 col_x, col_y, col_z = st.columns([1, 2, 1])
 
 with col_y:
-    st.subheader("☁️ 上传完整设计")
+    st.subheader("☁️ 添加到收藏集")
     
     has_drawing = canvas_result.image_data is not None
     has_materials = any(st.session_state.material_selections.values())
@@ -246,50 +294,71 @@ with col_y:
         else:
             st.warning("⚠️ 未选材料")
     
-    if st.button("🚀 上传完整设计", type="primary", use_container_width=True, 
+    if st.button("🚀 添加设计", type="primary", use_container_width=True, 
                  disabled=not (has_drawing or has_materials)):
         with st.spinner("正在上传..."):
-            if upload_complete_design(canvas_result, st.session_state.material_selections):
+            if upload_design(canvas_result, st.session_state.material_selections):
                 st.balloons()
-                st.success("🎉 设计已成功上传到云端！")
-                st.info("💡 现在可以启动评分系统监控这个设计了")
+                st.success("🎉 设计已添加到收藏集！")
 
 # 使用说明
 with st.expander("📖 使用指南"):
     st.markdown("""
-    ### 🎯 完整流程（超简单！）
+    ### 🎯 单Bin模式说明
     
-    **步骤 1：绘制设计**
-    - 在画布上自由绘制
-    - 可以选择不同工具（画笔、直线、矩形、圆形）
-    - 调整笔触粗细和颜色
+    **与之前的区别：**
+    - ❌ 旧版：每次上传创建新 Bin
+    - ✅ 新版：所有设计保存在同一个 Bin
     
-    **步骤 2：选择材料**
-    - 在左侧边栏选择三类材料
-    - 每类支持多选
+    **优势：**
+    1. **统一管理** - 所有设计在一个地方
+    2. **历史记录** - 自动保存设计历史
+    3. **评分友好** - 评分系统只需监控一个 Bin
+    4. **节省空间** - 不会创建大量 Bin
     
-    **步骤 3：上传**
-    - 点击"🚀 上传完整设计"按钮
-    - 完成！
+    ### 📋 使用流程
     
-    **步骤 4：启动评分系统**
-    - 打开新终端
-    - 运行: `python smart_scorer.py`
-    - 评分系统会自动监控这个 Bin
+    **首次使用：**
+    1. 绘制设计 + 选材料
+    2. 点击"添加设计"
+    3. 系统自动创建固定 Bin
+    4. Bin ID 保存到 `fixed_bin_id.txt`
     
-    ### ✨ 特点
+    **后续使用：**
+    1. 绘制新设计 + 选材料
+    2. 点击"添加设计"
+    3. 新设计添加到现有 Bin ✅
     
-    - **自动保存**：画完就保存，无需下载文件
-    - **实时预览**：右侧即时预览
-    - **一键上传**：图形和材料一起上传
-    - **智能追踪**：自动保存 Bin ID 供评分系统使用
-    - **手机友好**：完全适配手机操作
+    ### 🔧 数据结构
     
-    ### 🛠️ 绘图工具
+    ```json
+    {
+      "designs": [
+        {
+          "design_id": "20241228_143015",
+          "drawing": {...},
+          "materials": {...},
+          "created_at": "2024-12-28T14:30:15"
+        },
+        {
+          "design_id": "20241228_143520",
+          "drawing": {...},
+          "materials": {...},
+          "created_at": "2024-12-28T14:35:20"
+        }
+      ],
+      "metadata": {
+        "total_designs": 2,
+        "last_updated": "2024-12-28T14:35:20"
+      }
+    }
+    ```
     
-    - **freedraw**：自由绘制
-    - **line**：画直线
-    - **rect**：画矩形
-    - **circle**：画圆形
-    - **transform**：移动/调整对象
+    ### ⚠️ 重置 Bin
+    
+    如果需要重新开始（清空所有设计）：
+    1. 点击侧边栏的"🔄 重置 Bin ID"
+    2. 下次上传会创建新的 Bin
+    
+    **注意：** 旧 Bin 不会被删除，只是不再使用
     """)

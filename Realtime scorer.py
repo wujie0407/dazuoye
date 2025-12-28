@@ -1,122 +1,158 @@
 """
-智能实时评分系统
-自动追踪设计器创建的最新 Bin ID
+单Bin版实时评分系统
+监控一个 Bin 中的所有设计，只对新设计评分
 """
 
 import time
 import json
-import os
+import hashlib
 from datetime import datetime
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 from jsonbin import JSONBinService
 from kite_calculator import KiteCalculator
 
 
-class SmartRealtimeScorer:
-    """智能实时评分系统"""
+class SingleBinRealtimeScorer:
+    """单Bin版实时评分系统"""
     
-    def __init__(self, api_key: str, check_interval: int = 5, tracker_file: str = "latest_bin.txt"):
+    def __init__(self, api_key: str, check_interval: int = 3):
         """
-        初始化智能实时评分系统
+        初始化
         
         Args:
             api_key: JSONBin API Key
             check_interval: 检查间隔（秒）
-            tracker_file: 用于跟踪最新 Bin ID 的文件
         """
         self.api_key = api_key
         self.check_interval = check_interval
-        self.tracker_file = tracker_file
         self.jsonbin = JSONBinService(api_key)
         
-        self.current_bin_id = None
-        self.last_update_time = None
-        self.score_history = []
+        # 已评分的设计 ID 集合
+        self.scored_design_ids = set()
         
-        # 加载上次的 Bin ID
-        self._load_latest_bin()
+        # 当前 Bin ID
+        self.bin_id = None
+        
+        # 评分概要
+        self.score_summary = []
     
-    def _load_latest_bin(self):
-        """从文件加载最新的 Bin ID"""
-        if os.path.exists(self.tracker_file):
-            try:
-                with open(self.tracker_file, 'r') as f:
-                    self.current_bin_id = f.read().strip()
-                print(f"📂 加载上次的 Bin ID: {self.current_bin_id[:20]}...")
-            except:
-                pass
-    
-    def _save_latest_bin(self, bin_id: str):
-        """保存最新的 Bin ID 到文件"""
-        try:
-            with open(self.tracker_file, 'w') as f:
-                f.write(bin_id)
-        except:
-            pass
-    
-    def set_bin_id(self, bin_id: str):
+    def _get_bin_id(self) -> Optional[str]:
         """
-        手动设置要监控的 Bin ID
+        获取固定的 Bin ID
+        
+        优先级：
+        1. fixed_bin_id.txt（设计器使用）
+        2. latest_bin.txt（兼容旧版）
+        
+        Returns:
+            Bin ID 或 None
+        """
+        # 尝试读取固定 Bin ID
+        for filename in ['fixed_bin_id.txt', 'latest_bin.txt']:
+            try:
+                with open(filename, 'r') as f:
+                    bin_id = f.read().strip()
+                    if bin_id:
+                        return bin_id
+            except FileNotFoundError:
+                continue
+            except Exception as e:
+                print(f"⚠️ 读取 {filename} 失败: {str(e)}")
+        
+        return None
+    
+    def fetch_all_designs(self) -> Optional[List[Dict[str, Any]]]:
+        """
+        获取 Bin 中的所有设计
+        
+        Returns:
+            设计列表 或 None
+        """
+        # 获取 Bin ID
+        bin_id = self._get_bin_id()
+        
+        if not bin_id:
+            return None
+        
+        # 更新当前 Bin ID
+        if bin_id != self.bin_id:
+            print(f"\n📂 加载 Bin: {bin_id[:20]}...")
+            self.bin_id = bin_id
+        
+        # 读取数据
+        try:
+            response = self.jsonbin.read_bin(self.bin_id)
+            data = response.get('record', response)
+            
+            # 提取设计列表
+            designs = data.get('designs', [])
+            
+            return designs
+            
+        except Exception as e:
+            print(f"❌ 读取失败: {str(e)}")
+            return None
+    
+    def get_new_designs(self, all_designs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        筛选出未评分的新设计
         
         Args:
-            bin_id: Bin ID
+            all_designs: 所有设计列表
+            
+        Returns:
+            新设计列表
         """
-        self.current_bin_id = bin_id
-        self._save_latest_bin(bin_id)
-        print(f"✅ 已设置监控 Bin: {bin_id[:20]}...")
-    
-    def fetch_latest_data(self) -> Optional[Dict[str, Any]]:
-        """获取当前 Bin 的最新数据"""
-        if not self.current_bin_id:
-            print("⚠️ 未设置 Bin ID")
-            return None
+        new_designs = []
         
+        for design in all_designs:
+            design_id = design.get('design_id', design.get('created_at', 'unknown'))
+            
+            if design_id not in self.scored_design_ids:
+                new_designs.append(design)
+                self.scored_design_ids.add(design_id)
+        
+        return new_designs
+    
+    def calculate_score(self, design: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        计算单个设计的评分
+        
+        Args:
+            design: 设计数据
+            
+        Returns:
+            评分结果
+        """
         try:
-            response = self.jsonbin.read_bin(self.current_bin_id)
-            return response.get('record', response)
-        except Exception as e:
-            print(f"❌ 获取数据失败: {str(e)}")
-            return None
-    
-    def check_for_updates(self, current_data: Dict[str, Any]) -> bool:
-        """检查数据是否更新"""
-        # 检查多个时间戳来源
-        timestamps = [
-            current_data.get('metadata', {}).get('created_at'),
-            current_data.get('drawing', {}).get('timestamp'),
-        ]
-        
-        for ts in timestamps:
-            if ts and ts != self.last_update_time:
-                self.last_update_time = ts
-                return True
-        
-        return False
-    
-    def calculate_score(self, design_data: Dict[str, Any]) -> Dict[str, Any]:
-        """计算设计评分"""
-        try:
-            calculator = KiteCalculator(design_data)
+            # 构造 KiteCalculator 需要的数据格式
+            calculator_data = {
+                'drawing': design.get('drawing'),
+                'materials': design.get('materials'),
+                'metadata': {
+                    'created_at': design.get('created_at')
+                }
+            }
+            
+            calculator = KiteCalculator(calculator_data)
             params = calculator.calculate_all_parameters()
             
             score = self._calculate_comprehensive_score(params)
             
             return {
+                'design_id': design.get('design_id', 'unknown'),
                 'timestamp': datetime.now().isoformat(),
-                'bin_id': self.current_bin_id,
+                'created_at': design.get('created_at'),
                 'score': score,
                 'parameters': params,
-                'design_id': design_data.get('metadata', {}).get('created_at', 'unknown'),
                 'success': True
             }
             
         except Exception as e:
             print(f"❌ 计算评分失败: {str(e)}")
-            import traceback
-            traceback.print_exc()
             return {
+                'design_id': design.get('design_id', 'unknown'),
                 'timestamp': datetime.now().isoformat(),
-                'bin_id': self.current_bin_id,
                 'score': 0,
                 'error': str(e),
                 'success': False
@@ -181,84 +217,100 @@ class SmartRealtimeScorer:
     def display_score(self, score_data: Dict[str, Any]):
         """显示评分"""
         print("\n" + "="*60)
-        print("🎯 风筝设计评分结果")
+        print(f"🎯 设计评分 - {score_data.get('design_id', 'unknown')}")
         print("="*60)
         
         print(f"\n⭐ 综合评分: {score_data['score']}/100")
-        print(f"📅 评分时间: {score_data['timestamp']}")
+        print(f"📅 创建时间: {score_data.get('created_at', 'unknown')[:19]}")
         
         if score_data.get('success') and 'parameters' in score_data:
             params = score_data['parameters']
             
-            print("\n【基础参数】")
-            print(f"  面积: {params['dimensions']['area']} cm²")
-            print(f"  总重量: {params['weight']['total']} g")
+            print(f"\n📏 面积: {params['dimensions']['area']:.1f} cm²")
+            print(f"⚖️  重量: {params['weight']['total']:.1f} g")
+            print(f"💰 成本: ¥{params['cost']['estimated_cost']:.1f}")
             
-            print("\n【性能指标】")
-            print(f"  飞行稳定性: {params['performance']['flight_stability']}/100")
-            print(f"  结构强度: {params['performance']['strength_index']}/100")
-            print(f"  抗风性能: {params['performance']['wind_resistance']}/100")
+            print(f"\n🎯 性能:")
+            print(f"   稳定性: {params['performance']['flight_stability']:.0f}/100")
+            print(f"   强度: {params['performance']['strength_index']:.0f}/100")
             
-            print("\n【成本】")
-            print(f"  预估成本: ¥{params['cost']['estimated_cost']}")
+            # 材料
+            materials = []
+            for category, items in params['materials_used'].items():
+                if items:
+                    materials.extend(items)
             
-            print("\n【材料】")
-            for category, materials in params['materials_used'].items():
-                if materials:
-                    print(f"  {category}: {', '.join(materials)}")
+            if materials:
+                print(f"\n📦 材料: {', '.join(materials)}")
         
         print("\n" + "="*60 + "\n")
     
-    def save_score(self, score_data: Dict[str, Any]):
-        """保存评分结果"""
+    def save_score_summary(self, score_data: Dict[str, Any]):
+        """保存评分概要"""
+        summary = {
+            'design_id': score_data.get('design_id'),
+            'timestamp': score_data['timestamp'],
+            'created_at': score_data.get('created_at'),
+            'score': score_data['score']
+        }
+        
+        self.score_summary.append(summary)
+        
+        # 追加到文件
         try:
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"score_{timestamp}.json"
-            
-            with open(filename, 'w', encoding='utf-8') as f:
-                json.dump(score_data, f, indent=2, ensure_ascii=False)
-            
-            print(f"✅ 评分已保存: {filename}")
+            with open('scores_summary.jsonl', 'a', encoding='utf-8') as f:
+                f.write(json.dumps(summary, ensure_ascii=False) + '\n')
         except Exception as e:
-            print(f"❌ 保存失败: {str(e)}")
+            print(f"⚠️ 保存概要失败: {str(e)}")
     
-    def run_once(self) -> Optional[Dict[str, Any]]:
-        """执行一次评分"""
-        print(f"[{datetime.now().strftime('%H:%M:%S')}] 检查更新...")
+    def run_once(self) -> int:
+        """
+        执行一次检查
         
-        # 获取最新数据
-        data = self.fetch_latest_data()
-        if not data:
-            return None
+        Returns:
+            新评分的设计数量
+        """
+        current_time = datetime.now().strftime('%H:%M:%S')
+        print(f"[{current_time}] 检查更新...", end='')
         
-        # 检查是否更新
-        if not self.check_for_updates(data):
-            print("  无更新")
-            return None
+        # 获取所有设计
+        all_designs = self.fetch_all_designs()
         
-        print("  ✨ 发现新数据！开始评分...")
+        if all_designs is None:
+            print(" 无法读取数据")
+            return 0
         
-        # 计算评分
-        score_result = self.calculate_score(data)
+        # 筛选新设计
+        new_designs = self.get_new_designs(all_designs)
         
-        # 保存到历史
-        self.score_history.append(score_result)
+        if not new_designs:
+            print(f" 无新设计 (共 {len(all_designs)} 个)")
+            return 0
         
-        # 显示结果
-        self.display_score(score_result)
+        print(f" 发现 {len(new_designs)} 个新设计！")
         
-        # 保存到文件
-        self.save_score(score_result)
+        # 逐个评分
+        for design in new_designs:
+            score_result = self.calculate_score(design)
+            self.display_score(score_result)
+            self.save_score_summary(score_result)
         
-        return score_result
+        return len(new_designs)
     
     def run_continuous(self):
         """持续监控模式"""
-        print("🚀 智能实时评分系统启动")
-        print(f"📊 监控 Bin ID: {self.current_bin_id[:20] if self.current_bin_id else '未设置'}...")
-        print(f"⏱️  检查间隔: {self.check_interval} 秒")
-        print("\n💡 提示: 在设计器中上传新设计会自动更新此 Bin")
-        print("按 Ctrl+C 停止监控\n")
+        print("="*60)
+        print("   🚀 单Bin版实时评分系统")
+        print("="*60)
+        print("\n特性:")
+        print("  ✅ 监控单个 Bin 中的所有设计")
+        print("  ✅ 自动识别新设计")
+        print("  ✅ 只对每个设计评分一次")
+        print("  ✅ 支持批量评分")
+        print(f"\n⏱️  检查间隔: {self.check_interval} 秒")
+        print("💡 在设计器中添加新设计会自动评分")
+        print("\n按 Ctrl+C 停止\n")
+        print("="*60)
         
         try:
             while True:
@@ -266,56 +318,27 @@ class SmartRealtimeScorer:
                 time.sleep(self.check_interval)
                 
         except KeyboardInterrupt:
-            print("\n\n⏹️  监控已停止")
-            print(f"📈 共完成 {len(self.score_history)} 次评分")
+            print("\n\n" + "="*60)
+            print("⏹️  监控已停止")
+            print(f"📊 共评分 {len(self.score_summary)} 个设计")
+            
+            if self.score_summary:
+                print("\n最近评分:")
+                for summary in self.score_summary[-5:]:
+                    print(f"  • {summary['design_id']}: {summary['score']}/100")
+            
+            print("="*60)
 
 
 def main():
     """主函数"""
-    import sys
-    
     API_KEY = "$2a$10$pleOacf0lQu1mvIU//jjfeYPUCb.kiFXX.08qupD/90UYKwHtU8e."
     
-    print("="*60)
-    print("   智能实时评分系统")
-    print("="*60)
-    
     # 创建评分系统
-    scorer = SmartRealtimeScorer(API_KEY, check_interval=5)
+    scorer = SingleBinRealtimeScorer(API_KEY, check_interval=3)
     
-    # 检查是否有保存的 Bin ID
-    if not scorer.current_bin_id:
-        print("\n📋 首次运行，请输入 Bin ID:")
-        print("   (从设计器上传后，在左侧边栏复制)")
-        
-        if len(sys.argv) > 1:
-            bin_id = sys.argv[1]
-        else:
-            bin_id = input("\nBin ID: ").strip()
-        
-        if not bin_id:
-            print("❌ 错误: 未提供 Bin ID")
-            return
-        
-        scorer.set_bin_id(bin_id)
-    
-    print("\n选择运行模式:")
-    print("1. 单次评分")
-    print("2. 持续监控")
-    mode = input("> ").strip()
-    
-    if mode == "1":
-        result = scorer.run_once()
-        if result:
-            print("\n✅ 评分完成！")
-        else:
-            print("\n⚠️ 未找到数据或数据未更新")
-    
-    elif mode == "2":
-        scorer.run_continuous()
-    
-    else:
-        print("❌ 无效选项")
+    # 持续监控
+    scorer.run_continuous()
 
 
 if __name__ == "__main__":
