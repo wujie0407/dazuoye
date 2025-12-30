@@ -171,10 +171,28 @@ def upload_design(canvas_data, materials):
                 return False
             
             # 更新 Bin
-            service.update_bin(st.session_state.fixed_bin_id, complete_data)
-            
-            st.success(f"✅ 设计已添加！当前共 {len(existing_designs)} 个设计")
-            st.caption(f"数据大小: {data_size/1024:.1f}KB / 100KB")
+            try:
+                service.update_bin(st.session_state.fixed_bin_id, complete_data)
+                st.success(f"✅ 设计已添加！当前共 {len(existing_designs)} 个设计")
+                st.caption(f"数据大小: {data_size/1024:.1f}KB / 100KB")
+            except Exception as update_error:
+                # 如果 Bin 不存在（404），自动重建
+                if "404" in str(update_error) or "not found" in str(update_error).lower():
+                    st.warning("⚠️ 原 Bin 已删除，正在创建新 Bin...")
+                    
+                    # 重置 Bin ID
+                    st.session_state.fixed_bin_id = None
+                    
+                    # 重新创建
+                    result = service.create_bin(complete_data, bin_name="kite_designs_lightweight")
+                    st.session_state.fixed_bin_id = result['metadata']['id']
+                    save_fixed_bin_id(st.session_state.fixed_bin_id)
+                    
+                    st.success(f"✅ 新 Bin 已创建！Bin ID: {st.session_state.fixed_bin_id[:20]}...")
+                    st.info(f"当前共 {len(existing_designs)} 个设计")
+                else:
+                    # 其他错误，继续抛出
+                    raise
         
         st.session_state.last_upload_time = datetime.now().strftime("%H:%M:%S")
         st.session_state.design_count = len(get_existing_designs(service, st.session_state.fixed_bin_id))
