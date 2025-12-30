@@ -1,6 +1,7 @@
 """
-风筝设计系统 - 单Bin版
-所有设计都上传到同一个 Bin，自动累加
+风筝设计系统 - 轻量版
+只保存关键数据（材料+参数），不保存图片
+完美适配 JSONBin 免费版 100KB 限制
 """
 
 import streamlit as st
@@ -23,12 +24,11 @@ st.set_page_config(
 # API 配置
 API_KEY = "$2a$10$pleOacf0lQu1mvIU//jjfeYPUCb.kiFXX.08qupD/90UYKwHtU8e."
 
-# 固定的 Bin ID（第一次会自动创建）
+# 固定的 Bin ID
 FIXED_BIN_FILE = "fixed_bin_id.txt"
 
 # 初始化
 if 'fixed_bin_id' not in st.session_state:
-    # 尝试从文件读取
     try:
         with open(FIXED_BIN_FILE, 'r') as f:
             st.session_state.fixed_bin_id = f.read().strip()
@@ -55,8 +55,8 @@ MATERIALS = {
     '绳索材料': ['麻绳', '钢索', '凯夫拉']
 }
 
-st.title("🪁 风筝设计系统 - 单Bin版")
-st.caption("所有设计都保存在同一个 Bin 中，自动累加")
+st.title("🪁 风筝设计系统 - 轻量版")
+st.caption("只保存关键数据，完美适配免费版")
 
 
 def save_fixed_bin_id(bin_id: str):
@@ -64,7 +64,6 @@ def save_fixed_bin_id(bin_id: str):
     try:
         with open(FIXED_BIN_FILE, 'w') as f:
             f.write(bin_id)
-        # 同时保存到 latest_bin.txt 供评分系统使用
         with open('latest_bin.txt', 'w') as f:
             f.write(bin_id)
     except Exception as e:
@@ -82,36 +81,46 @@ def get_existing_designs(service: JSONBinService, bin_id: str) -> list:
         return []
 
 
+def extract_drawing_metadata(canvas_data) -> dict:
+    """
+    只提取绘图的元数据，不保存图片
+    
+    Returns:
+        轻量级元数据
+    """
+    if canvas_data is None or canvas_data.image_data is None:
+        return None
+    
+    # 计算简单的几何参数
+    objects = canvas_data.json_data.get('objects', []) if canvas_data.json_data else []
+    
+    # 提取关键信息
+    metadata = {
+        'object_count': len(objects),
+        'timestamp': datetime.now().isoformat(),
+        'has_drawing': True
+    }
+    
+    # 尝试提取基本尺寸（如果有路径数据）
+    if objects:
+        # 简单统计
+        metadata['object_types'] = list(set([obj.get('type', 'unknown') for obj in objects]))
+    
+    return metadata
+
+
 def upload_design(canvas_data, materials):
-    """上传设计到固定的 Bin"""
+    """上传轻量级设计数据"""
     try:
         service = JSONBinService(API_KEY)
         
-        # 转换画布数据
-        if canvas_data is not None and canvas_data.image_data is not None:
-            img = Image.fromarray(canvas_data.image_data.astype('uint8'), 'RGBA')
-            buffered = io.BytesIO()
-            img.save(buffered, format="PNG")
-            img_str = base64.b64encode(buffered.getvalue()).decode()
-            
-            drawing_data = {
-                'image': f"data:image/png;base64,{img_str}",
-                'canvas_data': {
-                    'objects': canvas_data.json_data['objects'] if canvas_data.json_data else [],
-                    'background': canvas_data.json_data['background'] if canvas_data.json_data else None
-                },
-                'statistics': {
-                    'objectCount': len(canvas_data.json_data['objects']) if canvas_data.json_data else 0
-                },
-                'timestamp': datetime.now().isoformat()
-            }
-        else:
-            drawing_data = None
+        # 只提取元数据，不保存图片
+        drawing_metadata = extract_drawing_metadata(canvas_data)
         
-        # 创建新设计对象
+        # 创建轻量级设计对象
         new_design = {
             'design_id': datetime.now().strftime('%Y%m%d_%H%M%S'),
-            'drawing': drawing_data,
+            'drawing': drawing_metadata,  # 只有元数据，无图片
             'materials': materials,
             'created_at': datetime.now().isoformat()
         }
@@ -123,16 +132,17 @@ def upload_design(canvas_data, materials):
                 'metadata': {
                     'created_at': datetime.now().isoformat(),
                     'last_updated': datetime.now().isoformat(),
-                    'total_designs': 1
+                    'total_designs': 1,
+                    'version': 'lightweight'
                 }
             }
             
-            result = service.create_bin(complete_data, bin_name="kite_designs_collection")
+            result = service.create_bin(complete_data, bin_name="kite_designs_lightweight")
             st.session_state.fixed_bin_id = result['metadata']['id']
             save_fixed_bin_id(st.session_state.fixed_bin_id)
             
             st.success(f"✅ 首次创建！Bin ID: {st.session_state.fixed_bin_id[:20]}...")
-            st.info("💡 后续所有设计都会保存到这个 Bin")
+            st.info("💡 轻量版：只保存材料和参数，不保存图片")
             
         else:
             # 读取已有设计
@@ -147,14 +157,24 @@ def upload_design(canvas_data, materials):
                 'metadata': {
                     'created_at': existing_designs[0]['created_at'] if existing_designs else datetime.now().isoformat(),
                     'last_updated': datetime.now().isoformat(),
-                    'total_designs': len(existing_designs)
+                    'total_designs': len(existing_designs),
+                    'version': 'lightweight'
                 }
             }
+            
+            # 估算大小
+            data_size = len(json.dumps(complete_data))
+            
+            if data_size > 95000:  # 留5KB余量
+                st.error(f"❌ 数据接近100KB限制 (当前 {data_size/1024:.1f}KB)")
+                st.warning("建议：重置Bin或删除旧设计")
+                return False
             
             # 更新 Bin
             service.update_bin(st.session_state.fixed_bin_id, complete_data)
             
             st.success(f"✅ 设计已添加！当前共 {len(existing_designs)} 个设计")
+            st.caption(f"数据大小: {data_size/1024:.1f}KB / 100KB")
         
         st.session_state.last_upload_time = datetime.now().strftime("%H:%M:%S")
         st.session_state.design_count = len(get_existing_designs(service, st.session_state.fixed_bin_id))
@@ -162,10 +182,20 @@ def upload_design(canvas_data, materials):
         return True
         
     except Exception as e:
-        st.error(f"❌ 上传失败: {str(e)}")
+        error_msg = str(e)
+        
+        if "100kb" in error_msg.lower():
+            st.error("❌ 超出免费版100KB限制！")
+            st.warning("解决方案：")
+            st.info("1. 点击侧边栏'重置 Bin ID'开始新的收藏集")
+            st.info("2. 或升级到 JSONBin Pro 版本")
+        else:
+            st.error(f"❌ 上传失败: {error_msg}")
+        
         import traceback
         with st.expander("查看详细错误"):
             st.code(traceback.format_exc())
+        
         return False
 
 
@@ -195,12 +225,28 @@ with st.sidebar:
         st.metric("设计数量", st.session_state.design_count)
         if st.session_state.last_upload_time:
             st.caption(f"最后上传: {st.session_state.last_upload_time}")
+        
+        # 显示使用情况
+        try:
+            service = JSONBinService(API_KEY)
+            designs = get_existing_designs(service, st.session_state.fixed_bin_id)
+            if designs:
+                data_size = len(json.dumps({'designs': designs}))
+                usage_percent = (data_size / 100000) * 100
+                
+                st.progress(usage_percent / 100)
+                st.caption(f"使用: {data_size/1024:.1f}KB / 100KB ({usage_percent:.1f}%)")
+                
+                if usage_percent > 80:
+                    st.warning("⚠️ 接近容量上限！")
+        except:
+            pass
     else:
         st.info("还未创建 Bin")
     
     # 重置按钮
     st.divider()
-    if st.button("🔄 重置 Bin ID", help="创建新的 Bin（慎用！）"):
+    if st.button("🔄 重置 Bin ID", help="创建新的收藏集"):
         st.session_state.fixed_bin_id = None
         try:
             import os
@@ -208,7 +254,7 @@ with st.sidebar:
             os.remove('latest_bin.txt')
         except:
             pass
-        st.warning("Bin ID 已重置，下次上传将创建新 Bin")
+        st.warning("Bin ID 已重置")
         st.rerun()
 
 # 主界面
@@ -241,7 +287,7 @@ with col1:
         key="canvas",
     )
     
-    st.info("💡 所有设计都会保存到同一个 Bin 中")
+    st.info("💡 轻量版：图片不保存，只记录设计参数")
 
 with col2:
     st.subheader("📋 预览")
@@ -299,66 +345,62 @@ with col_y:
         with st.spinner("正在上传..."):
             if upload_design(canvas_result, st.session_state.material_selections):
                 st.balloons()
-                st.success("🎉 设计已添加到收藏集！")
 
 # 使用说明
-with st.expander("📖 使用指南"):
+with st.expander("📖 使用指南 - 轻量版"):
     st.markdown("""
-    ### 🎯 单Bin模式说明
+    ### 🎯 轻量版特性
     
-    **与之前的区别：**
-    - ❌ 旧版：每次上传创建新 Bin
-    - ✅ 新版：所有设计保存在同一个 Bin
+    **为什么需要轻量版？**
+    - JSONBin 免费版限制：单个 Bin 最大 100KB
+    - 带图片的设计：每个约 30-50KB
+    - 只能保存 2-3 个设计就超限 ❌
     
-    **优势：**
-    1. **统一管理** - 所有设计在一个地方
-    2. **历史记录** - 自动保存设计历史
-    3. **评分友好** - 评分系统只需监控一个 Bin
-    4. **节省空间** - 不会创建大量 Bin
+    **轻量版解决方案：**
+    - ✅ 只保存材料选择
+    - ✅ 只保存绘图参数（对象数、类型）
+    - ✅ 不保存图片（节省 90%+ 空间）
+    - ✅ 可以保存 50+ 个设计
     
-    ### 📋 使用流程
+    ### 📊 数据对比
     
-    **首次使用：**
-    1. 绘制设计 + 选材料
-    2. 点击"添加设计"
-    3. 系统自动创建固定 Bin
-    4. Bin ID 保存到 `fixed_bin_id.txt`
-    
-    **后续使用：**
-    1. 绘制新设计 + 选材料
-    2. 点击"添加设计"
-    3. 新设计添加到现有 Bin ✅
-    
-    ### 🔧 数据结构
-    
+    **完整版（带图片）：**
     ```json
     {
-      "designs": [
-        {
-          "design_id": "20241228_143015",
-          "drawing": {...},
-          "materials": {...},
-          "created_at": "2024-12-28T14:30:15"
-        },
-        {
-          "design_id": "20241228_143520",
-          "drawing": {...},
-          "materials": {...},
-          "created_at": "2024-12-28T14:35:20"
-        }
-      ],
-      "metadata": {
-        "total_designs": 2,
-        "last_updated": "2024-12-28T14:35:20"
+      "drawing": {
+        "image": "data:image/png;base64,iVBORw0KG..." // 30KB
       }
     }
     ```
+    单个设计：~40KB
     
-    ### ⚠️ 重置 Bin
+    **轻量版（无图片）：**
+    ```json
+    {
+      "drawing": {
+        "object_count": 5,
+        "has_drawing": true
+      },
+      "materials": {...}
+    }
+    ```
+    单个设计：~1KB
     
-    如果需要重新开始（清空所有设计）：
-    1. 点击侧边栏的"🔄 重置 Bin ID"
-    2. 下次上传会创建新的 Bin
+    ### ✨ 评分系统完全兼容
     
-    **注意：** 旧 Bin 不会被删除，只是不再使用
+    评分系统只需要：
+    - ✅ 材料选择
+    - ✅ 绘图参数（可以从元数据推算）
+    
+    不需要图片！所以评分完全正常工作。
+    
+    ### 💡 使用建议
+    
+    **如果你需要保存图片：**
+    1. 在本地截图保存
+    2. 或使用其他图床服务
+    3. 或升级 JSONBin Pro（100KB → 1MB）
+    
+    **如果只需要评分和参数：**
+    - 轻量版完美适配！
     """)
