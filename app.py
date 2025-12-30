@@ -1,7 +1,6 @@
 """
-风筝设计系统 - 轻量版
-只保存关键数据（材料+参数），不保存图片
-完美适配 JSONBin 免费版 100KB 限制
+风筝设计系统 - AI 图像生成版
+轻量版 + 智谱 AI 图像生成
 """
 
 import streamlit as st
@@ -13,16 +12,18 @@ import io
 import base64
 
 from jsonbin import JSONBinService
+from zhipu_image import ZhipuImageGenerator
 
 # 页面配置
 st.set_page_config(
-    page_title="风筝设计系统",
+    page_title="风筝设计系统 - AI生成",
     page_icon="🪁",
     layout="wide"
 )
 
 # API 配置
-API_KEY = "$2a$10$pleOacf0lQu1mvIU//jjfeYPUCb.kiFXX.08qupD/90UYKwHtU8e."
+JSONBIN_API_KEY = "$2a$10$pleOacf0lQu1mvIU//jjfeYPUCb.kiFXX.08qupD/90UYKwHtU8e."
+ZHIPU_API_KEY = "b91a0c07fd0640f488491d6bd0fa4e7f.z5j8U7iiyrWkO5sc"
 
 # 固定的 Bin ID
 FIXED_BIN_FILE = "fixed_bin_id.txt"
@@ -48,6 +49,12 @@ if 'material_selections' not in st.session_state:
 if 'design_count' not in st.session_state:
     st.session_state.design_count = 0
 
+if 'last_generated_image' not in st.session_state:
+    st.session_state.last_generated_image = None
+
+if 'generating_image' not in st.session_state:
+    st.session_state.generating_image = False
+
 # 材料数据库
 MATERIALS = {
     '骨架材料': ['竹子', '铝合金', '碳纤维'],
@@ -55,8 +62,8 @@ MATERIALS = {
     '绳索材料': ['麻绳', '钢索', '凯夫拉']
 }
 
-st.title("🪁 风筝设计系统 - 轻量版")
-st.caption("只保存关键数据，完美适配免费版")
+st.title("🪁 风筝设计系统 - AI 图像生成")
+st.caption("轻量版 + 智谱 AI 图像生成")
 
 
 def save_fixed_bin_id(bin_id: str):
@@ -82,50 +89,56 @@ def get_existing_designs(service: JSONBinService, bin_id: str) -> list:
 
 
 def extract_drawing_metadata(canvas_data) -> dict:
-    """
-    只提取绘图的元数据，不保存图片
-    
-    Returns:
-        轻量级元数据
-    """
+    """只提取绘图的元数据"""
     if canvas_data is None or canvas_data.image_data is None:
         return None
     
-    # 计算简单的几何参数
     objects = canvas_data.json_data.get('objects', []) if canvas_data.json_data else []
     
-    # 提取关键信息
     metadata = {
         'object_count': len(objects),
         'timestamp': datetime.now().isoformat(),
         'has_drawing': True
     }
     
-    # 尝试提取基本尺寸（如果有路径数据）
     if objects:
-        # 简单统计
         metadata['object_types'] = list(set([obj.get('type', 'unknown') for obj in objects]))
     
     return metadata
 
 
-def upload_design(canvas_data, materials):
+def generate_ai_image(materials: dict) -> dict:
+    """生成 AI 图像"""
+    try:
+        generator = ZhipuImageGenerator(ZHIPU_API_KEY)
+        
+        design_data = {'materials': materials}
+        
+        result = generator.generate_kite_image(design_data, size="1024x1024")
+        
+        return result
+        
+    except Exception as e:
+        st.error(f"图像生成失败: {str(e)}")
+        return None
+
+
+def upload_design(canvas_data, materials, ai_image_url=None):
     """上传轻量级设计数据"""
     try:
-        service = JSONBinService(API_KEY)
+        service = JSONBinService(JSONBIN_API_KEY)
         
-        # 只提取元数据，不保存图片
         drawing_metadata = extract_drawing_metadata(canvas_data)
         
         # 创建轻量级设计对象
         new_design = {
             'design_id': datetime.now().strftime('%Y%m%d_%H%M%S'),
-            'drawing': drawing_metadata,  # 只有元数据，无图片
+            'drawing': drawing_metadata,
             'materials': materials,
+            'ai_image_url': ai_image_url,  # 保存 AI 生成的图片 URL
             'created_at': datetime.now().isoformat()
         }
         
-        # 如果没有固定 Bin，创建新的
         if not st.session_state.fixed_bin_id:
             complete_data = {
                 'designs': [new_design],
@@ -133,65 +146,52 @@ def upload_design(canvas_data, materials):
                     'created_at': datetime.now().isoformat(),
                     'last_updated': datetime.now().isoformat(),
                     'total_designs': 1,
-                    'version': 'lightweight'
+                    'version': 'lightweight_ai'
                 }
             }
             
-            result = service.create_bin(complete_data, bin_name="kite_designs_lightweight")
+            result = service.create_bin(complete_data, bin_name="kite_designs_ai")
             st.session_state.fixed_bin_id = result['metadata']['id']
             save_fixed_bin_id(st.session_state.fixed_bin_id)
             
             st.success(f"✅ 首次创建！Bin ID: {st.session_state.fixed_bin_id[:20]}...")
-            st.info("💡 轻量版：只保存材料和参数，不保存图片")
             
         else:
-            # 读取已有设计
             existing_designs = get_existing_designs(service, st.session_state.fixed_bin_id)
-            
-            # 添加新设计
             existing_designs.append(new_design)
             
-            # 更新完整数据
             complete_data = {
                 'designs': existing_designs,
                 'metadata': {
                     'created_at': existing_designs[0]['created_at'] if existing_designs else datetime.now().isoformat(),
                     'last_updated': datetime.now().isoformat(),
                     'total_designs': len(existing_designs),
-                    'version': 'lightweight'
+                    'version': 'lightweight_ai'
                 }
             }
             
-            # 估算大小
             data_size = len(json.dumps(complete_data))
             
-            if data_size > 95000:  # 留5KB余量
+            if data_size > 95000:
                 st.error(f"❌ 数据接近100KB限制 (当前 {data_size/1024:.1f}KB)")
                 st.warning("建议：重置Bin或删除旧设计")
                 return False
             
-            # 更新 Bin
             try:
                 service.update_bin(st.session_state.fixed_bin_id, complete_data)
                 st.success(f"✅ 设计已添加！当前共 {len(existing_designs)} 个设计")
                 st.caption(f"数据大小: {data_size/1024:.1f}KB / 100KB")
             except Exception as update_error:
-                # 如果 Bin 不存在（404），自动重建
                 if "404" in str(update_error) or "not found" in str(update_error).lower():
                     st.warning("⚠️ 原 Bin 已删除，正在创建新 Bin...")
-                    
-                    # 重置 Bin ID
                     st.session_state.fixed_bin_id = None
                     
-                    # 重新创建
-                    result = service.create_bin(complete_data, bin_name="kite_designs_lightweight")
+                    result = service.create_bin(complete_data, bin_name="kite_designs_ai")
                     st.session_state.fixed_bin_id = result['metadata']['id']
                     save_fixed_bin_id(st.session_state.fixed_bin_id)
                     
-                    st.success(f"✅ 新 Bin 已创建！Bin ID: {st.session_state.fixed_bin_id[:20]}...")
-                    st.info(f"当前共 {len(existing_designs)} 个设计")
+                    st.success(f"✅ 新 Bin 已创建！")
                 else:
-                    # 其他错误，继续抛出
                     raise
         
         st.session_state.last_upload_time = datetime.now().strftime("%H:%M:%S")
@@ -204,15 +204,9 @@ def upload_design(canvas_data, materials):
         
         if "100kb" in error_msg.lower():
             st.error("❌ 超出免费版100KB限制！")
-            st.warning("解决方案：")
-            st.info("1. 点击侧边栏'重置 Bin ID'开始新的收藏集")
-            st.info("2. 或升级到 JSONBin Pro 版本")
+            st.info("点击侧边栏'重置 Bin ID'开始新的收藏集")
         else:
             st.error(f"❌ 上传失败: {error_msg}")
-        
-        import traceback
-        with st.expander("查看详细错误"):
-            st.code(traceback.format_exc())
         
         return False
 
@@ -243,28 +237,11 @@ with st.sidebar:
         st.metric("设计数量", st.session_state.design_count)
         if st.session_state.last_upload_time:
             st.caption(f"最后上传: {st.session_state.last_upload_time}")
-        
-        # 显示使用情况
-        try:
-            service = JSONBinService(API_KEY)
-            designs = get_existing_designs(service, st.session_state.fixed_bin_id)
-            if designs:
-                data_size = len(json.dumps({'designs': designs}))
-                usage_percent = (data_size / 100000) * 100
-                
-                st.progress(usage_percent / 100)
-                st.caption(f"使用: {data_size/1024:.1f}KB / 100KB ({usage_percent:.1f}%)")
-                
-                if usage_percent > 80:
-                    st.warning("⚠️ 接近容量上限！")
-        except:
-            pass
     else:
         st.info("还未创建 Bin")
     
-    # 重置按钮
     st.divider()
-    if st.button("🔄 重置 Bin ID", help="创建新的收藏集"):
+    if st.button("🔄 重置 Bin ID"):
         st.session_state.fixed_bin_id = None
         try:
             import os
@@ -281,7 +258,6 @@ col1, col2 = st.columns([2, 1])
 with col1:
     st.subheader("🖌️ 绘图区")
     
-    # 画笔设置
     col_a, col_b, col_c = st.columns(3)
     with col_a:
         stroke_width = st.slider("笔触粗细", 1, 25, 3)
@@ -293,7 +269,6 @@ with col1:
             ("freedraw", "line", "rect", "circle", "transform")
         )
     
-    # 创建画布
     canvas_result = st_canvas(
         fill_color="rgba(255, 165, 0, 0.3)",
         stroke_width=stroke_width,
@@ -304,13 +279,10 @@ with col1:
         drawing_mode=drawing_mode,
         key="canvas",
     )
-    
-    st.info("💡 轻量版：图片不保存，只记录设计参数")
 
 with col2:
     st.subheader("📋 预览")
     
-    # 材料预览
     with st.expander("📦 已选材料", expanded=True):
         has_materials = False
         for category, selected in st.session_state.material_selections.items():
@@ -323,7 +295,6 @@ with col2:
         if not has_materials:
             st.info("还未选择材料")
     
-    # 图形预览
     st.divider()
     if canvas_result.image_data is not None:
         st.write("**绘图预览:**")
@@ -335,17 +306,48 @@ with col2:
     else:
         st.info("👈 开始绘制")
 
+# AI 图像生成区域
+st.divider()
+st.subheader("🎨 AI 图像生成")
+
+col_ai1, col_ai2 = st.columns([1, 2])
+
+with col_ai1:
+    if st.button("🚀 生成 AI 风筝图片", type="primary", use_container_width=True,
+                 disabled=not any(st.session_state.material_selections.values())):
+        
+        st.session_state.generating_image = True
+        
+        with st.spinner("🎨 AI 正在生成图片...（需要 10-30 秒）"):
+            result = generate_ai_image(st.session_state.material_selections)
+            
+            if result:
+                st.session_state.last_generated_image = result
+                st.success("✅ 生成成功！")
+            else:
+                st.error("❌ 生成失败")
+        
+        st.session_state.generating_image = False
+
+with col_ai2:
+    if st.session_state.last_generated_image:
+        st.image(
+            st.session_state.last_generated_image['url'],
+            caption="AI 生成的风筝效果图",
+            use_container_width=True
+        )
+
 # 上传按钮
 st.divider()
 col_x, col_y, col_z = st.columns([1, 2, 1])
 
 with col_y:
-    st.subheader("☁️ 添加到收藏集")
+    st.subheader("☁️ 保存设计")
     
     has_drawing = canvas_result.image_data is not None
     has_materials = any(st.session_state.material_selections.values())
     
-    c1, c2 = st.columns(2)
+    c1, c2, c3 = st.columns(3)
     with c1:
         if has_drawing:
             st.success("✅ 已绘制")
@@ -358,67 +360,74 @@ with col_y:
         else:
             st.warning("⚠️ 未选材料")
     
-    if st.button("🚀 添加设计", type="primary", use_container_width=True, 
+    with c3:
+        if st.session_state.last_generated_image:
+            st.success("✅ 已生成AI图")
+        else:
+            st.info("未生成")
+    
+    if st.button("💾 保存完整设计", type="secondary", use_container_width=True, 
                  disabled=not (has_drawing or has_materials)):
-        with st.spinner("正在上传..."):
-            if upload_design(canvas_result, st.session_state.material_selections):
+        
+        ai_url = st.session_state.last_generated_image['url'] if st.session_state.last_generated_image else None
+        
+        with st.spinner("正在保存..."):
+            if upload_design(canvas_result, st.session_state.material_selections, ai_url):
                 st.balloons()
+                st.success("🎉 设计已保存！")
+                
+                if ai_url:
+                    st.info("💡 AI 图片URL已保存，评分系统可以显示")
 
 # 使用说明
-with st.expander("📖 使用指南 - 轻量版"):
+with st.expander("📖 使用指南 - AI 图像生成版"):
     st.markdown("""
-    ### 🎯 轻量版特性
+    ### 🎯 完整流程
     
-    **为什么需要轻量版？**
-    - JSONBin 免费版限制：单个 Bin 最大 100KB
-    - 带图片的设计：每个约 30-50KB
-    - 只能保存 2-3 个设计就超限 ❌
+    **步骤 1：绘制草图**
+    - 在画布上画出风筝的基本形状
     
-    **轻量版解决方案：**
-    - ✅ 只保存材料选择
-    - ✅ 只保存绘图参数（对象数、类型）
-    - ✅ 不保存图片（节省 90%+ 空间）
-    - ✅ 可以保存 50+ 个设计
+    **步骤 2：选择材料**
+    - 在左侧选择骨架、面料、绳索材料
     
-    ### 📊 数据对比
+    **步骤 3：生成 AI 图片**
+    - 点击"🚀 生成 AI 风筝图片"
+    - 等待 10-30 秒
+    - AI 会根据你的材料选择生成逼真的风筝图片
     
-    **完整版（带图片）：**
-    ```json
-    {
-      "drawing": {
-        "image": "data:image/png;base64,iVBORw0KG..." // 30KB
-      }
-    }
+    **步骤 4：保存设计**
+    - 点击"💾 保存完整设计"
+    - 草图、材料、AI图片 URL 都会保存
+    
+    ### ✨ AI 图像生成
+    
+    **智谱 AI CogView-4：**
+    - 高质量 1024x1024 图片
+    - 根据材料自动生成提示词
+    - 真实的风筝效果展示
+    
+    **生成逻辑：**
     ```
-    单个设计：~40KB
+    竹子 → "竹制骨架，自然的竹节纹理"
+    丝绸 → "丝绸材质，柔软光滑，带有自然光泽"
+    麻绳 → "天然麻绳，粗糙质感"
     
-    **轻量版（无图片）：**
-    ```json
-    {
-      "drawing": {
-        "object_count": 5,
-        "has_drawing": true
-      },
-      "materials": {...}
-    }
+    组合成完整提示词 → AI 生成
     ```
-    单个设计：~1KB
     
-    ### ✨ 评分系统完全兼容
+    ### 💾 数据存储
     
-    评分系统只需要：
+    保存内容：
+    - ✅ 绘图参数（轻量）
     - ✅ 材料选择
-    - ✅ 绘图参数（可以从元数据推算）
+    - ✅ AI 图片 URL（智谱提供的链接）
     
-    不需要图片！所以评分完全正常工作。
+    **注意：** AI 图片不保存在 JSONBin，只保存 URL
     
-    ### 💡 使用建议
+    ### 📊 评分系统
     
-    **如果你需要保存图片：**
-    1. 在本地截图保存
-    2. 或使用其他图床服务
-    3. 或升级 JSONBin Pro（100KB → 1MB）
-    
-    **如果只需要评分和参数：**
-    - 轻量版完美适配！
+    评分系统会：
+    1. 读取材料数据
+    2. 计算评分
+    3. 如果有 AI 图片 URL，可以显示效果图
     """)
