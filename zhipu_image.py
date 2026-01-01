@@ -114,7 +114,7 @@ class ZhipuImageGenerator:
         url = f"{self.BASE_URL}/images/generations"
         
         payload = {
-            "model": "cogview-4-20250304",  # 最新模型
+            "model": "cogView-4-250304",  # 最新模型
             "prompt": prompt,
             "size": size,
             "quality": quality
