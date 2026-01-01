@@ -1,4 +1,17 @@
+# 风筝设计评估系统 - 依赖包
+
+# Web 框架
 streamlit>=1.28.0
+
+# HTTP 请求
 requests>=2.31.0
+
+# 图像处理
 Pillow>=10.0.0
+
+# Streamlit 绘图组件
 streamlit-drawable-canvas>=0.9.0
+
+# 数据处理（可选）
+# pandas>=2.0.0
+# numpy>=1.24.0
