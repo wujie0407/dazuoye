@@ -1162,52 +1162,35 @@
         async function fetchDesigns() {
             const jsonbinUrl = `https://api.jsonbin.io/v3/b/${CONFIG.BIN_ID}/latest`;
             
-            // 多个CORS代理备选
-            const proxies = [
-                url => `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`,
-                url => `https://corsproxy.io/?${encodeURIComponent(url)}`,
-                url => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`
-            ];
-            
-            for (let i = 0; i < proxies.length; i++) {
-                try {
-                    const proxyUrl = proxies[i](jsonbinUrl);
-                    debugLog(`尝试代理 ${i + 1}...`, 'info');
-                    
-                    const res = await fetch(proxyUrl, { timeout: 8000 });
-                    if (!res.ok) continue;
-                    
-                    let data;
-                    const text = await res.text();
-                    
-                    // allorigins 返回 {contents: "..."} 格式
-                    if (text.includes('"contents"')) {
-                        const proxy = JSON.parse(text);
-                        if (!proxy.contents) continue;
-                        data = JSON.parse(proxy.contents);
-                    } else {
-                        // 其他代理直接返回数据
-                        data = JSON.parse(text);
+            try {
+                debugLog('直接请求 JSONBin...', 'info');
+                
+                const res = await fetch(jsonbinUrl, {
+                    method: 'GET',
+                    headers: {
+                        'X-Master-Key': CONFIG.JSONBIN_API_KEY
                     }
-                    
-                    connectionOk = true;
-                    document.getElementById('status-connection').textContent = '✓ 已连接';
-                    document.getElementById('status-connection').className = 'status-item success';
-                    debugLog(`代理 ${i + 1} 成功`, 'success');
-                    
-                    return data.record?.designs || [];
-                } catch (e) {
-                    debugLog(`代理 ${i + 1} 失败: ${e.message}`, 'warn');
-                    continue;
+                });
+                
+                if (!res.ok) {
+                    throw new Error(`HTTP ${res.status}`);
                 }
+                
+                const data = await res.json();
+                
+                connectionOk = true;
+                document.getElementById('status-connection').textContent = '✓ 已连接';
+                document.getElementById('status-connection').className = 'status-item success';
+                debugLog('JSONBin 连接成功', 'success');
+                
+                return data.record?.designs || [];
+            } catch (e) {
+                connectionOk = false;
+                document.getElementById('status-connection').textContent = '✗ 断开';
+                document.getElementById('status-connection').className = 'status-item error';
+                debugLog(`JSONBin 失败: ${e.message}`, 'error');
+                return null;
             }
-            
-            // 所有代理都失败
-            connectionOk = false;
-            document.getElementById('status-connection').textContent = '✗ 断开';
-            document.getElementById('status-connection').className = 'status-item error';
-            debugLog('所有代理均失败', 'error');
-            return null;
         }
         
         function calcScore(d) {
@@ -1262,6 +1245,7 @@
                 }
             }
         }
+        
         function startListening() {
             debugLog('开始监听');
             fetchDesigns().then(ds => {
