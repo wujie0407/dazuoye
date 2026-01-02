@@ -453,7 +453,7 @@
     <script>
         // ==================== 配置 ====================
         const CONFIG = {
-            BIN_ID: "6957845543b1c97be913f3f2",
+            BIN_ID: "695796c6d0ea881f404f4611",
             JSONBIN_API_KEY: "$2a$10$pleOacf0lQu1mvIU//jjfeYPUCb.kiFXX.08qupD/90UYKwHtU8e.",
             ZHIPU_API_KEY: "b91a0c07fd0640f488491d6bd0fa4e7f.z5j8U7iiyrWkO5sc",
             ZHIPU_API_URL: "https://open.bigmodel.cn/api/paas/v4/chat/completions",
@@ -1160,25 +1160,54 @@
         }
         
         async function fetchDesigns() {
-            try {
-                const res = await fetch(`https://api.allorigins.win/get?url=${encodeURIComponent(`https://api.jsonbin.io/v3/b/${CONFIG.BIN_ID}/latest`)}`);
-                if (!res.ok) throw new Error('请求失败');
-                const proxy = await res.json();
-                if (!proxy.contents) throw new Error('空数据');
-                const data = JSON.parse(proxy.contents);
-                
-                connectionOk = true;
-                document.getElementById('status-connection').textContent = '✓ 已连接';
-                document.getElementById('status-connection').className = 'status-item success';
-                
-                return data.record?.designs || [];
-            } catch (e) {
-                connectionOk = false;
-                document.getElementById('status-connection').textContent = '✗ 断开';
-                document.getElementById('status-connection').className = 'status-item error';
-                debugLog(e.message, 'error');
-                return null;
+            const jsonbinUrl = `https://api.jsonbin.io/v3/b/${CONFIG.BIN_ID}/latest`;
+            
+            // 多个CORS代理备选
+            const proxies = [
+                url => `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`,
+                url => `https://corsproxy.io/?${encodeURIComponent(url)}`,
+                url => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`
+            ];
+            
+            for (let i = 0; i < proxies.length; i++) {
+                try {
+                    const proxyUrl = proxies[i](jsonbinUrl);
+                    debugLog(`尝试代理 ${i + 1}...`, 'info');
+                    
+                    const res = await fetch(proxyUrl, { timeout: 8000 });
+                    if (!res.ok) continue;
+                    
+                    let data;
+                    const text = await res.text();
+                    
+                    // allorigins 返回 {contents: "..."} 格式
+                    if (text.includes('"contents"')) {
+                        const proxy = JSON.parse(text);
+                        if (!proxy.contents) continue;
+                        data = JSON.parse(proxy.contents);
+                    } else {
+                        // 其他代理直接返回数据
+                        data = JSON.parse(text);
+                    }
+                    
+                    connectionOk = true;
+                    document.getElementById('status-connection').textContent = '✓ 已连接';
+                    document.getElementById('status-connection').className = 'status-item success';
+                    debugLog(`代理 ${i + 1} 成功`, 'success');
+                    
+                    return data.record?.designs || [];
+                } catch (e) {
+                    debugLog(`代理 ${i + 1} 失败: ${e.message}`, 'warn');
+                    continue;
+                }
             }
+            
+            // 所有代理都失败
+            connectionOk = false;
+            document.getElementById('status-connection').textContent = '✗ 断开';
+            document.getElementById('status-connection').className = 'status-item error';
+            debugLog('所有代理均失败', 'error');
+            return null;
         }
         
         function calcScore(d) {
@@ -1213,11 +1242,18 @@
             document.getElementById('status-time').textContent = new Date().toLocaleTimeString();
             
             const designs = await fetchDesigns();
-            if (!designs) return;
+            if (!designs) {
+                debugLog('获取设计失败', 'error');
+                return;
+            }
+            
+            debugLog(`获取到 ${designs.length} 个设计，已处理 ${processedDesigns.size} 个`, 'info');
             
             for (let d of designs) {
                 const id = d.design_id || d.created_at;
+                debugLog(`检查设计: ${id}`, 'info');
                 if (!processedDesigns.has(id)) {
+                    debugLog(`发现新设计: ${id}`, 'success');
                     processedDesigns.add(id);
                     evaluatedCount++;
                     document.getElementById('status-count').textContent = `已评估: ${evaluatedCount}`;
@@ -1226,7 +1262,6 @@
                 }
             }
         }
-        
         function startListening() {
             debugLog('开始监听');
             fetchDesigns().then(ds => {

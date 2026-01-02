@@ -194,6 +194,7 @@ class DesignRepository:
     def __init__(self, jsonbin_service: Optional[JSONBinService] = None):
         self.jsonbin = jsonbin_service or JSONBinService()
         self._bin_id: Optional[str] = None
+        self._default_bin_id: str = "695796c6d0ea881f404f4611"  # 默认BIN ID
     
     @property
     def bin_id(self) -> Optional[str]:
@@ -214,7 +215,9 @@ class DesignRepository:
             except FileNotFoundError:
                 continue
         
-        return None
+        # 如果文件不存在，使用默认BIN ID
+        self._bin_id = self._default_bin_id
+        return self._bin_id
     
     @bin_id.setter
     def bin_id(self, value: str):
