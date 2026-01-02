@@ -247,8 +247,7 @@ with col_y:
     has_drawing = canvas_result.image_data is not None
     has_materials = any(st.session_state.material_selections.values())
     
-    # 状态指示
-    # 状态指示
+   # 状态指示
     c1, c2, c3 = st.columns(3)
     with c1:
         if has_drawing:
@@ -260,6 +259,11 @@ with col_y:
             st.success("✅ 已选材料")
         else:
             st.warning("⚠️ 未选材料")
+    with c3:
+        if st.session_state.last_generated_image:
+            st.success("✅ 已生成AI图")
+        else:
+            st.info("未生成")
     
     # 保存按钮
     if st.button(
